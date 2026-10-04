@@ -22,3 +22,5 @@ dialog{border:0;border-radius:14px;padding:16px;width:min(92vw,520px)}
 dialog::backdrop{background:#0006}
 .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 .vide{text-align:center;color:#566;padding:24px}
+.rapide{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.rapide .btn{flex:1;min-width:64px}

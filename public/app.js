@@ -110,7 +110,11 @@ function accueil() {
       <div class="petit">Prévision d'après la consommation observée lors des comptages, mois par mois.</div>
       ${bas ? `<p class="alerte">Stock sous le seuil de ${seuil} jours : prévois une commande.</p>` : ""}`;
   }
-  return `<div class="carte"><h2>Foin</h2>${bloc}</div>
+  const sorties = liste(S.foyer.foin?.sorties).sort((x, y) => (y.ts || 0) - (x.ts || 0));
+  const rapide = p ? `<div class="rapide">${[["1", "− 1"], ["1/2", "− 1/2"], ["1/3", "− 1/3"]].map(([q, t]) => `<button class="btn sec" data-a="retirer" data-q="${q}">${t}</button>`).join("")}
+      <button class="btn sec" data-a="retirer" data-q="autre">− …</button><button class="btn" data-a="inventaire">Comptage</button></div>
+      ${sorties[0] ? `<div class="petit" style="margin-top:8px">Dernière sortie : ${fmtQte(+sorties[0].balles || 0)} le ${fr(sorties[0].date)} · <a href="#" data-a="annulerSortie" data-id="${sorties[0].id}">annuler</a>${p.sorties ? ` · ${fmtQte(p.sorties)} balles sorties depuis le comptage` : ""}</div>` : ""}` : "";
+  return `<div class="carte"><h2>Foin</h2>${bloc}${rapide}</div>
     <div class="carte ligne"><span>Chevaux actifs</span><b>${nb}</b></div>`;
 }
 
@@ -214,6 +218,13 @@ const actions = {
       id && (() => remove(base(`foin/livraisons/${id}`))));
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
+  retirer(_id, d) {
+    const noter = async q => { if (q > 0) await set(push(base("foin/sorties")), { date: ajd(), balles: q, ts: Date.now() }); };
+    if (d?.q && d.q !== "autre") return noter(parseQte(d.q));
+    ouvrir("Retirer du stock", champ("b", "Quantité retirée (ex. 1/3 ou 2)", "", "text", 'inputmode="decimal"') + champ("d", "Date", ajd(), "date"),
+      () => { const q = parseQte(val("b")); return q > 0 ? set(push(base("foin/sorties")), { date: val("d") || ajd(), balles: q, ts: Date.now() }) : null; });
+  },
+  annulerSortie: id => remove(base(`foin/sorties/${id}`)),
   inventaire(id) {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
@@ -247,6 +258,6 @@ const actions = {
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-a]");
   if (!el || !S.foyer) return;
-  e.stopPropagation();
-  actions[el.dataset.a]?.(el.dataset.id);
+  e.stopPropagation(); e.preventDefault();
+  actions[el.dataset.a]?.(el.dataset.id, el.dataset);
 });
