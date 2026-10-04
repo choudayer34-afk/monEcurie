@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, remove, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, comptages, periodes, prevision } from "./prevision.js";
+import { jour, enChaine, liste, comptages, periodes, prevision, consoMensuelle } from "./prevision.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -13,7 +13,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const S = { user: null, fid: null, foyer: null, vue: "accueil" };
+const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear() };
 
 /* ---------- Dates et prévision ---------- */
 const aujourdhui = () => { const d = new Date(); return jour(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`); };
@@ -111,7 +111,10 @@ function accueil() {
       ${bas ? `<p class="alerte">Stock sous le seuil de ${seuil} jours : prévois une commande.</p>` : ""}`;
   }
   const sorties = liste(S.foyer.foin?.sorties).sort((x, y) => (y.ts || 0) - (x.ts || 0));
-  const rapide = p ? `<div class="rapide">${[["1", "− 1"], ["1/2", "− 1/2"], ["1/3", "− 1/3"]].map(([q, t]) => `<button class="btn sec" data-a="retirer" data-q="${q}">${t}</button>`).join("")}
+  const reste = p ? p.stockAuj - Math.floor(p.stockAuj + 1e-6) : 0;
+  const entamee = p && p.reel && reste > 0.01 && reste < 0.99
+    ? `<div class="rapide"><button class="btn" data-a="finirBalle">Balle entamée finie (reste ${fmtQte(reste)})</button></div>` : "";
+  const rapide = p ? entamee + `<div class="rapide">${[["1", "− 1"], ["1/2", "− 1/2"], ["1/3", "− 1/3"], ["1/4", "− 1/4"]].map(([q, t]) => `<button class="btn sec" data-a="retirer" data-q="${q}">${t}</button>`).join("")}
       <button class="btn sec" data-a="retirer" data-q="autre">− …</button><button class="btn" data-a="inventaire">Comptage</button></div>
       ${sorties[0] ? `<div class="petit" style="margin-top:8px">Dernière sortie : ${fmtQte(+sorties[0].balles || 0)} le ${fr(sorties[0].date)} · <a href="#" data-a="annulerSortie" data-id="${sorties[0].id}">annuler</a>${p.sorties ? ` · ${fmtQte(p.sorties)} balles sorties depuis le comptage` : ""}</div>` : ""}` : "";
   return `<div class="carte"><h2>Foin</h2>${bloc}${rapide}</div>
@@ -125,13 +128,33 @@ function chevaux() {
       <div class="petit">${esc(c.robe || "")} ${c.naissance ? "· né le " + fr(c.naissance) : ""} ${c.sire ? " · SIRE " + esc(c.sire) : ""}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucun cheval.</p>`);
 }
 
+function graphique() {
+  const m = consoMensuelle(S.foyer), an = S.annee;
+  const V = (y, i) => m[`${y}-${String(i + 1).padStart(2, "0")}`];
+  const sel = [...Array(12)].map((_, i) => V(an, i)), prev = [...Array(12)].map((_, i) => V(an - 1, i));
+  const max = Math.max(1, ...sel.filter(x => x != null), ...prev.filter(x => x != null));
+  const H = 105, bas = 125, tot = t => Math.round(t.reduce((s, x) => s + (x || 0), 0));
+  let svg = "";
+  "JFMAMJJASOND".split("").forEach((l, i) => {
+    const x = i * 28 + 6;
+    if (prev[i] != null) { const h = prev[i] / max * H; svg += `<rect class="b1" x="${x}" y="${bas - h}" width="10" height="${h}" rx="2"/>`; }
+    if (sel[i] != null) { const h = sel[i] / max * H; svg += `<rect class="b2" x="${x + 12}" y="${bas - h}" width="10" height="${h}" rx="2"/><text class="t" x="${x + 17}" y="${bas - h - 3}">${Math.round(sel[i])}</text>`; }
+    svg += `<text class="t m" x="${x + 11}" y="141">${l}</text>`;
+  });
+  return `<div class="carte"><div class="ligne"><h2>Consommation par mois</h2>
+      <div><button class="btn sec" data-a="annee" data-d="-1">‹</button> <b>${an}</b> <button class="btn sec" data-a="annee" data-d="1">›</button></div></div>
+    <svg viewBox="0 0 340 148" class="graph" role="img" aria-label="Balles consommées par mois">${svg}</svg>
+    <div class="petit"><span class="pastille b1"></span>${an - 1} : ${tot(prev)} balles · <span class="pastille b2"></span>${an} : ${tot(sel)} balles</div>
+    <div class="petit">Balles entières, calculées entre les comptages et d'après les sorties notées.</div></div>`;
+}
+
 function foin() {
   const f = S.foyer.foin || {}, cop = S.foyer.copeaux || {};
   const cs = comptages(S.foyer).reverse(), per = Object.fromEntries(periodes(S.foyer).map(p => [p.idFin, p]));
   const livs = liste(f.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const livC = liste(cop.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const nomC = id => S.foyer.contacts?.[id]?.nom || "";
-  return `<div class="ligne" style="margin-bottom:10px"><h2>Comptages du foin</h2><div><button class="btn sec" data-a="params">Alerte</button> <button class="btn" data-a="inventaire">+ Comptage</button></div></div>` +
+  return graphique() + `<div class="ligne" style="margin-bottom:10px"><h2>Comptages du foin</h2><div><button class="btn sec" data-a="params">Alerte</button> <button class="btn" data-a="inventaire">+ Comptage</button></div></div>` +
     (cs.map(c => { const p = per[c.id]; return `<div class="carte ligne" data-a="inventaire" data-id="${c.id}"><div><b>${fmtQte(+c.balles || 0)} balles</b> · ${fr(c.date)}
       <div class="petit">${p ? p.conso < 0 ? `<span class="alerte">Incohérent depuis le ${fr(p.du)} : livraison oubliée ?</span>` : `Depuis le ${fr(p.du)} : ${fmtQte(Math.round(p.conso * 100) / 100)} balles consommées (${fmtQte(Math.round(p.rate * 100) / 100)}/jour sur ${p.jours} jours)` : "Premier comptage"}</div></div><span>›</span></div>`; }).join("") || `<p class="vide">Aucun comptage. Tu peux saisir des comptages des années passées pour la prévision.</p>`) +
     `<div class="ligne" style="margin:18px 0 10px"><h2>Livraisons de foin</h2><button class="btn" data-a="livraison">+ Livraison</button></div>` +
@@ -224,12 +247,18 @@ const actions = {
     ouvrir("Retirer du stock", champ("b", "Quantité retirée (ex. 1/3 ou 2)", "", "text", 'inputmode="decimal"') + champ("d", "Date", ajd(), "date"),
       () => { const q = parseQte(val("b")); return q > 0 ? set(push(base("foin/sorties")), { date: val("d") || ajd(), balles: q, ts: Date.now() }) : null; });
   },
+  finirBalle() {
+    const p = prevision(S.foyer, aujourdhui()); if (!p) return;
+    const r = p.stockAuj - Math.floor(p.stockAuj + 1e-6);
+    if (r > 0.01 && r < 0.99) return set(push(base("foin/sorties")), { date: ajd(), balles: r, ts: Date.now() });
+  },
+  annee: (_id, d) => { S.annee += +d.d; rendre(); },
   annulerSortie: id => remove(base(`foin/sorties/${id}`)),
   inventaire(id) {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
     ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées (ex. 25 ou 12 1/3)", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
-      () => set(id ? base(chemin) : push(base("foin/inventaires")), { date: val("d"), balles: parseQte(val("b")) }),
+      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; return set(id ? base(chemin) : push(base("foin/inventaires")), o); },
       id && (() => remove(base(chemin))));
   },
   params() {
