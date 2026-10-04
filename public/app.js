@@ -14,12 +14,43 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear() };
+const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear(), filtre: "tous" };
 
-/* ---------- Dates et prévision ---------- */
+/* ---------- Icônes ---------- */
+const I = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  fer: '<path d="M5 21V10a7 7 0 0 1 14 0v11h-4V10a3 3 0 0 0-6 0v11z"/>',
+  blé: '<path d="M12 21V9"/><path d="M12 9c-3 0-4.5-2-4.5-4.5 3 0 4.5 2 4.5 4.5zM12 9c3 0 4.5-2 4.5-4.5-3 0-4.5 2-4.5 4.5zM12 15c-3 0-4.5-2-4.5-4.5 3 0 4.5 2 4.5 4.5zM12 15c3 0 4.5-2 4.5-4.5-3 0-4.5 2-4.5 4.5z"/>',
+  croix: '<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5c3 0 5 1.5 5 4.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M5 13l4 4L19 7"/>',
+  droite: '<path d="M9 6l6 6-6 6"/>',
+  gauche: '<path d="M15 6l-6 6 6 6"/>',
+  fermer: '<path d="M6 6l12 12M18 6L6 18"/>',
+  tel: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  pin: '<path d="M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  reglage: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  vaccin: '<path d="M15 4l5 5M13 6l5 5-8 8-5-5zM8 14l-4 6M17 3l4 4"/>',
+  pilule: '<path d="M10.5 20.5a5 5 0 0 1-7-7l10-10a5 5 0 0 1 7 7z"/><path d="M8.5 8.5l7 7"/>',
+  dent: '<path d="M9 3c-2.5 0-4 2-4 4.5 0 2 1 3.5 1.5 5.5.5 2.5.5 8 2.5 8 1.8 0 1.5-5 3-5s1.2 5 3 5c2 0 2-5.5 2.5-8 .5-2 1.5-3.5 1.5-5.5C19 5 17.5 3 15 3c-1.5 0-2 1-3 1S10.5 3 9 3z"/>',
+  sapin: '<path d="M12 3l6 8h-3.5l4.5 7H5l4.5-7H6z"/><path d="M12 18v3"/>',
+  retour: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  copie: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  calendrier: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  sortie: '<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M16 8l4 4-4 4M20 12H9"/>'
+};
+const ic = (n, c = "") => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+const ICONE_SOIN = { vaccin: "vaccin", vermifuge: "pilule", dentiste: "dent", ferrure: "fer" };
+const ICONE_ROLE = { "Fournisseur de foin": "blé", "Vétérinaire": "croix", "Maréchal-ferrant": "fer", "Autre": "user" };
+
+/* ---------- Dates, quantités, prix ---------- */
 const aujourdhui = () => { const d = new Date(); return jour(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`); };
+const ajd = () => enChaine(aujourdhui());
 const fr = d => d ? d.split("-").reverse().join("/") : "";
-
+const frCourt = d => d ? new Date(d + "T12:00").toLocaleDateString("fr-FR", d.slice(0, 4) === String(new Date().getFullYear()) ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" }) : "";
 const parseQte = t => {
   t = String(t ?? "").trim().replace(",", ".");
   const m = t.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/);
@@ -29,12 +60,22 @@ const parseQte = t => {
 const fmtQte = n => {
   const w = Math.floor(n + 1e-9), f = n - w;
   for (const [a, b] of [[1, 4], [1, 3], [1, 2], [2, 3], [3, 4]]) if (Math.abs(f - a / b) < 0.012) return (w ? w + " " : "") + a + "/" + b;
-  return String(Math.round(n * 100) / 100);
+  return String(Math.round(n * 100) / 100).replace(".", ",");
 };
+const taux = n => String(Math.round(n * 100) / 100).replace(".", ",");
+const balles = n => `${fmtQte(n)} balle${n >= 2 ? "s" : ""}`;
 const num = t => parseFloat(String(t ?? "").replace(",", ".")) || 0;
 const arr = n => Math.round(n * 100) / 100;
 const euro = n => n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
-const infoPrix = l => `${l.prixBalle ? ` · ${euro(l.prixBalle)}/balle` : ""}${l.prixTotal ? ` · total ${euro(l.prixTotal)}` : ""}`;
+const infoPrix = l => [l.prixBalle ? `${euro(l.prixBalle)}/balle` : "", l.prixTotal ? `total ${euro(l.prixTotal)}` : ""].filter(Boolean).join(" · ");
+const age = n => {
+  if (!n) return "";
+  const m = Math.floor((Date.now() - new Date(n).getTime()) / 2629800000);
+  return m < 24 ? `${Math.max(m, 0)} mois` : `${Math.floor(m / 12)} ans`;
+};
+const quand = j => (j < 0 ? `en retard de ${-j} j` : j === 0 ? "aujourd'hui" : j === 1 ? "demain" : `dans ${j} j`);
+const base = p => ref(db, `foyers/${S.fid}/${p}`);
+
 /* ---------- Authentification et foyer ---------- */
 onAuthStateChanged(auth, async u => {
   S.user = u;
@@ -46,25 +87,28 @@ onAuthStateChanged(auth, async u => {
     () => { $("#vue").innerHTML = `<div class="carte alerte">Accès au foyer refusé.</div>`; });
 });
 
+const accroche = (titre, sous) => `<div class="accueil-log"><div class="logo">${ic("fer")}</div><h2>${titre}</h2><p>${sous}</p></div>`;
+
 function ecranConnexion() {
-  $("#nav").hidden = true;
-  $("#vue").innerHTML = `<div class="carte"><h2>Connexion</h2>
-    <label>E-mail</label><input id="em" type="email" autocomplete="email">
-    <label>Mot de passe</label><input id="mp" type="password" autocomplete="current-password">
+  $("#nav").hidden = true; $("#titre").textContent = "Écurie"; $("#sous").textContent = ""; $("#foyerNom").textContent = "";
+  $("#vue").innerHTML = accroche("Bienvenue", "Foin, soins et rappels de l'écurie, partagés en famille.") + `<div class="carte">
+    <label for="em">E-mail</label><input id="em" type="email" autocomplete="email" inputmode="email">
+    <label for="mp">Mot de passe</label><input id="mp" type="password" autocomplete="current-password">
     <p id="err" class="alerte petit"></p>
-    <div class="actions"><button class="btn sec" id="cree">Créer un compte</button><button class="btn" id="ent">Se connecter</button></div></div>`;
+    <button class="btn plein" id="ent">Se connecter</button>
+    <button class="btn sec plein" id="cree" style="margin-top:8px">Créer un compte</button></div>`;
   const go = fn => async () => { try { await fn(auth, $("#em").value.trim(), $("#mp").value); } catch (e) { $("#err").textContent = "Échec : " + e.code; } };
   $("#ent").onclick = go(signInWithEmailAndPassword);
   $("#cree").onclick = go(createUserWithEmailAndPassword);
 }
 
 function ecranFoyer() {
-  $("#nav").hidden = true;
-  $("#vue").innerHTML = `<div class="carte"><h2>Créer le foyer</h2>
-      <label>Nom du foyer</label><input id="fn" placeholder="Famille …"><div class="actions"><button class="btn" id="cf">Créer</button></div></div>
-    <div class="carte"><h2>Rejoindre un foyer</h2>
-      <label>Code d'invitation</label><input id="cd" maxlength="6" style="text-transform:uppercase">
-      <p id="err" class="alerte petit"></p><div class="actions"><button class="btn" id="rf">Rejoindre</button></div></div>`;
+  $("#nav").hidden = true; $("#titre").textContent = "Ton foyer"; $("#sous").textContent = "";
+  $("#vue").innerHTML = accroche("Ton foyer", "Toute la famille partage les mêmes données.") + `<div class="carte"><h3>Créer le foyer</h3>
+      <label for="fn">Nom du foyer</label><input id="fn" placeholder="Famille …"><button class="btn plein" id="cf">Créer</button></div>
+    <div class="carte"><h3>Rejoindre un foyer</h3>
+      <label for="cd">Code d'invitation</label><input id="cd" maxlength="6" class="code" autocapitalize="characters">
+      <p id="err" class="alerte petit"></p><button class="btn sec plein" id="rf">Rejoindre</button></div>`;
   $("#cf").onclick = async () => {
     const nom = $("#fn").value.trim(); if (!nom) return;
     const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join("");
@@ -86,95 +130,143 @@ function ecranFoyer() {
   };
 }
 
+/* ---------- Composants ---------- */
+const AVATARS = 6;
+const teinte = t => [...String(t)].reduce((s, c) => s + c.charCodeAt(0), 0) % AVATARS;
+const avatar = nom => `<span class="avatar a${teinte(nom)}">${esc((nom || "?").trim().charAt(0).toUpperCase())}</span>`;
+const bulle = (icone, classe = "") => `<span class="bulle ${classe}">${ic(icone)}</span>`;
+const entete = (titre, droite = "") => `<div class="entete"><h2>${titre}</h2><div class="droite">${droite}</div></div>`;
+const bouton = (icone, a, extra = "", label = "") => `<button class="ib" data-a="${a}" ${extra} aria-label="${label}" title="${label}">${ic(icone)}</button>`;
+const rangee = ({ gauche, titre, sous = "", a, id = "", droite = "", classe = "" }) =>
+  `<div class="rangee ${classe}" ${a ? `data-a="${a}" data-id="${id}"` : ""}>${gauche}<div class="corps"><div class="titre">${titre}</div>${sous ? `<div class="petit">${sous}</div>` : ""}</div>${droite || (a ? `<span class="chev">${ic("droite")}</span>` : "")}</div>`;
+const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "grande")}<p>${texte}</p>${cta}</div>`;
+
 /* ---------- Vues ---------- */
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; rendre(); });
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
 const vues = { accueil, chevaux, soins, foin, contacts, reglages };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer" };
 
 function rendre() {
   if (!S.foyer) return;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === S.vue));
-  $("#titre").textContent = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer" }[S.vue];
+  const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
+  $("#titre").textContent = TITRES[S.vue];
+  $("#sous").textContent = {
+    accueil: new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
+    chevaux: `${nbC} ${nbC > 1 ? "chevaux actifs" : "cheval actif"}`,
+    soins: "Vaccins, ferrure, dentiste…",
+    foin: "Foin et copeaux",
+    contacts: "Fournisseurs et soignants",
+    reglages: "Partage et compte"
+  }[S.vue];
+  const y = window.scrollY;
   $("#vue").innerHTML = vues[S.vue]();
+  window.scrollTo(0, y);
+}
+
+/* --- Accueil --- */
+function hero(p, seuil) {
+  if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
+    <p class="hero-s">Compte tes balles pour démarrer le suivi du stock.</p><button class="btn or" data-a="inventaire">Premier comptage</button></section>`;
+  const prev = p.historique, bas = prev && p.jours !== null && p.jours <= seuil, mid = prev && !bas && p.jours !== null && p.jours <= seuil * 2;
+  const etat = !prev ? "Prévision après un 2e comptage" : bas ? "Commande à prévoir" : mid ? "À surveiller" : "Stock confortable";
+  const pct = !prev ? 100 : p.jours === null ? 100 : Math.min(100, p.jours / (seuil * 4) * 100);
+  return `<section class="hero ${bas ? "bas" : mid ? "mid" : ""}">
+    <div class="hero-t">${ic("blé")}<span>Foin</span><span class="etat">${etat}</span></div>
+    ${prev ? `<div class="hero-n">${p.jours === null ? "4 ans +" : p.jours}<small>${p.jours === null ? "" : p.jours <= 1 ? " jour" : " jours"}</small></div>
+      <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
+      <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
+    : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div><p class="hero-s">Au comptage du ${fr(p.last.date)}, livraisons comprises.</p>`}
+  </section>`;
+}
+
+function statistiques(nbC, plan) {
+  const retard = plan.filter(s => s.j !== null && s.j < 0).length, bientot = plan.filter(s => s.j !== null && s.j >= 0 && s.j <= 30).length;
+  const mois = consoMensuelle(S.foyer)[new Date().toISOString().slice(0, 7)];
+  const tuile = (v, l, c = "") => `<div class="stat ${c}"><b>${v}</b><span>${l}</span></div>`;
+  return `<div class="stats">${tuile(nbC, "chevaux actifs")}${tuile(retard + bientot, "soins à prévoir", retard ? "alerte-t" : "")}${tuile(mois == null ? "–" : Math.round(mois), "balles ce mois")}</div>`;
+}
+
+function rapide(p) {
+  const reste = p.stockAuj - Math.floor(p.stockAuj + 1e-6);
+  const entamee = p.reel && reste > 0.01 && reste < 0.99
+    ? `<button class="btn or plein" data-a="finirBalle">${ic("check")} Balle entamée finie <small>(reste ${fmtQte(reste)})</small></button>` : "";
+  const tuiles = [["1", "1"], ["1/2", "½"], ["1/3", "⅓"], ["1/4", "¼"]].map(([q, t]) => `<button class="tuile" data-a="retirer" data-q="${q}"><b>− ${t}</b><span>balle</span></button>`).join("");
+  return `<div class="carte">${entete("Sortie rapide", bouton("reglage", "params", "", "Seuil d'alerte"))}
+    ${entamee}<div class="tuiles">${tuiles}</div>
+    <div class="duo"><button class="btn sec" data-a="retirer" data-q="autre">Autre quantité…</button><button class="btn sec" data-a="inventaire">${ic("check")} Comptage</button></div></div>`;
 }
 
 function accueil() {
   const p = prevision(S.foyer, aujourdhui()), seuil = +(S.foyer.foin?.seuilJours) || 14;
-  const nb = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
-  let bloc;
-  if (!p) bloc = `<p class="vide">Fais un premier comptage du foin dans l'onglet Stock.</p>`;
-  else if (!p.historique) bloc = `<div class="grand">${fmtQte(p.stockAuj)} balles</div>
-      <div class="petit">Stock au comptage du ${fr(p.last.date)}, livraisons comprises. La prévision apparaîtra après un second comptage.</div>`;
-  else {
-    const bas = p.jours !== null && p.jours <= seuil;
-    bloc = `<div class="grand ${bas ? "alerte" : "ok"}">${p.jours === null ? "Plus de 4 ans" : p.jours + " jours"}</div>
-      <div class="petit">Rupture prévue : ${p.rupture ? fr(p.rupture) : "aucune"} · Stock estimé : ${fmtQte(p.stockAuj)} balles</div>
-      <div class="petit">Prévision d'après la consommation observée lors des comptages, mois par mois.</div>
-      ${bas ? `<p class="alerte">Stock sous le seuil de ${seuil} jours : prévois une commande.</p>` : ""}`;
-  }
-  const sorties = liste(S.foyer.foin?.sorties).sort((x, y) => (y.ts || 0) - (x.ts || 0));
-  const reste = p ? p.stockAuj - Math.floor(p.stockAuj + 1e-6) : 0;
-  const entamee = p && p.reel && reste > 0.01 && reste < 0.99
-    ? `<div class="rapide"><button class="btn" data-a="finirBalle">Balle entamée finie (reste ${fmtQte(reste)})</button></div>` : "";
-  const rapide = p ? entamee + `<div class="rapide">${[["1", "− 1"], ["1/2", "− 1/2"], ["1/3", "− 1/3"], ["1/4", "− 1/4"]].map(([q, t]) => `<button class="btn sec" data-a="retirer" data-q="${q}">${t}</button>`).join("")}
-      <button class="btn sec" data-a="retirer" data-q="autre">− …</button><button class="btn" data-a="inventaire">Comptage</button></div>
-      ${sorties[0] ? `<div class="petit" style="margin-top:8px">Dernière sortie : ${fmtQte(+sorties[0].balles || 0)} le ${fr(sorties[0].date)} · <a href="#" data-a="annulerSortie" data-id="${sorties[0].id}">annuler</a>${p.sorties ? ` · ${fmtQte(p.sorties)} balles sorties depuis le comptage` : ""}</div>` : ""}` : "";
-  return `<div class="carte"><h2>Foin</h2>${bloc}${rapide}</div>
-    ${soinsAccueil()}
-    <div class="carte ligne"><span>Chevaux actifs</span><b>${nb}</b></div>`;
+  const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length, plan = soinsPrevus();
+  const urgents = plan.filter(s => s.j !== null && s.j <= 30);
+  return hero(p, seuil) + statistiques(nbC, plan) + (p ? rapide(p) : "") +
+    (plan.length ? `<div class="carte">${entete("Soins à prévoir", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
+      ${urgents.length ? urgents.slice(0, 5).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
+      ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "");
 }
 
-const nomCheval = id => S.foyer.chevaux?.[id]?.nom || "Cheval supprimé";
-const quand = j => (j < 0 ? `en retard de ${-j} j` : j === 0 ? "aujourd'hui" : `dans ${j} j`);
-const classeSoin = j => (j === null ? "" : j < 0 ? "alerte" : j <= 30 ? "bientot" : "");
+/* --- Soins --- */
 function soinsPrevus() {
   const auj = aujourdhui();
   return liste(S.foyer.soins).filter(s => S.foyer.chevaux?.[s.chevalId])
     .map(s => { const ech = echeance(s); return { ...s, ech, j: joursAvant(ech, auj) }; })
     .sort((x, y) => (x.ech === null) - (y.ech === null) || (x.ech || "").localeCompare(y.ech || ""));
 }
-function carteSoin(s, fait = true) {
-  return `<div class="carte ligne" data-a="soin" data-id="${s.id}"><div><b>${esc(libelleSoin(s))}</b> · ${esc(nomCheval(s.chevalId))}
-    <div class="petit">Dernier : ${s.dernier ? fr(s.dernier) : "jamais"} · Prochain : ${s.ech ? fr(s.ech) : "à planifier"}</div>
-    ${s.j !== null ? `<div class="petit ${classeSoin(s.j)}">${quand(s.j)}</div>` : ""}</div>
-    ${fait ? `<button class="btn sec" data-a="soinFait" data-id="${s.id}">Fait</button>` : ""}</div>`;
-}
-function soinsAccueil() {
-  const tous = soinsPrevus(); if (!tous.length) return "";
-  const a = tous.filter(s => s.j !== null && s.j <= 30);
-  return `<h2 style="margin:16px 0 8px">Soins à prévoir</h2>` + (a.length ? a.slice(0, 6).map(s => carteSoin(s)).join("") : `<div class="carte petit">Rien à prévoir dans les 30 jours.</div>`) +
-    (a.length > 6 ? `<p class="petit"><a href="#" data-a="vue" data-v="soins">Voir les ${a.length} soins</a></p>` : "");
+const urgence = j => (j === null ? "neutre" : j < 0 ? "retard" : j <= 30 ? "bientot" : "ok");
+function ligneSoin(s) {
+  return rangee({
+    gauche: bulle(ICONE_SOIN[s.type] || "croix", urgence(s.j)), classe: `u-${urgence(s.j)}`, a: "soin", id: s.id,
+    titre: `${esc(libelleSoin(s))} · ${esc(S.foyer.chevaux[s.chevalId].nom)}`,
+    sous: s.j === null ? "À planifier" : `<span class="q ${urgence(s.j)}">${quand(s.j)}</span> · ${frCourt(s.ech)}${s.dernier ? ` · fait le ${frCourt(s.dernier)}` : ""}`,
+    droite: `<button class="fait" data-a="soinFait" data-id="${s.id}" aria-label="Marquer comme fait" title="Fait aujourd'hui">${ic("check")}</button>`
+  });
 }
 function soins() {
-  const l = soinsPrevus();
-  return `<div class="ligne" style="margin-bottom:10px"><h2>Soins</h2><button class="btn" data-a="soin">+ Soin</button></div>` +
-    (l.map(s => carteSoin(s)).join("") || `<p class="vide">Aucun soin suivi (vaccins, vermifuge, dentiste, ferrure).</p>`);
+  const tous = soinsPrevus(), l = S.filtre === "tous" ? tous : tous.filter(s => s.type === S.filtre);
+  const chips = [["tous", "Tous", ""], ...Object.entries(TYPES).map(([k, t]) => [k, t.nom, ICONE_SOIN[k]])]
+    .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
+  const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
+  const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
+  return `<div class="chips">${chips}</div>` + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+    `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
+/* --- Chevaux --- */
 function chevaux() {
-  const l = liste(S.foyer.chevaux).sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
-  return `<div class="ligne" style="margin-bottom:10px"><h2>Chevaux</h2><button class="btn" data-a="cheval">+ Ajouter</button></div>` +
-    (l.map(c => `<div class="carte ligne" data-a="cheval" data-id="${c.id}"><div><b>${esc(c.nom)}</b> ${c.actif === false ? '<span class="petit">(inactif)</span>' : ""}
-      <div class="petit">${esc(c.robe || "")} ${c.naissance ? "· né le " + fr(c.naissance) : ""} ${c.sire ? " · SIRE " + esc(c.sire) : ""}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucun cheval.</p>`);
+  const l = liste(S.foyer.chevaux).sort((a, b) => (b.actif !== false) - (a.actif !== false) || (a.nom || "").localeCompare(b.nom || ""));
+  const plan = soinsPrevus();
+  return (l.length ? `<div class="carte liste">${l.map(c => {
+    const prochain = plan.find(s => s.chevalId === c.id && s.j !== null);
+    return rangee({
+      gauche: avatar(c.nom), classe: c.actif === false ? "inactif" : "", a: "cheval", id: c.id, titre: esc(c.nom),
+      sous: [esc(c.robe || ""), age(c.naissance), c.sire ? "SIRE " + esc(c.sire) : "", c.actif === false ? "inactif" : ""].filter(Boolean).join(" · ") || "Fiche à compléter",
+      droite: prochain ? `<span class="badge ${urgence(prochain.j)}">${ic(ICONE_SOIN[prochain.type])}${quand(prochain.j)}</span>` : `<span class="chev">${ic("droite")}</span>`
+    });
+  }).join("")}</div>` : vide("fer", "Ajoute ton premier cheval.", `<button class="btn" data-a="cheval">${ic("plus")} Ajouter un cheval</button>`)) +
+    `<button class="fab" data-a="cheval" aria-label="Ajouter un cheval" title="Ajouter un cheval">${ic("plus")}</button>`;
 }
 
+/* --- Stock --- */
 function graphique() {
-  const m = consoMensuelle(S.foyer), an = S.annee;
-  const V = (y, i) => m[`${y}-${String(i + 1).padStart(2, "0")}`];
-  const sel = [...Array(12)].map((_, i) => V(an, i)), prev = [...Array(12)].map((_, i) => V(an - 1, i));
+  const m = consoMensuelle(S.foyer), an = S.annee, cle = (y, i) => `${y}-${String(i + 1).padStart(2, "0")}`;
+  const sel = [...Array(12)].map((_, i) => m[cle(an, i)]), prev = [...Array(12)].map((_, i) => m[cle(an - 1, i)]);
   const max = Math.max(1, ...sel.filter(x => x != null), ...prev.filter(x => x != null));
-  const H = 105, bas = 125, tot = t => Math.round(t.reduce((s, x) => s + (x || 0), 0));
-  let svg = "";
+  const haut = 100, bas = 124, moisCourant = new Date().getFullYear() === an ? new Date().getMonth() : -1;
+  const tot = t => Math.round(t.reduce((s, x) => s + (x || 0), 0)), tS = tot(sel), tP = tot(prev);
+  let svg = [0.5, 1].map(f => `<line x1="0" x2="340" y1="${bas - f * haut}" y2="${bas - f * haut}" class="grille"/>`).join("") + `<text class="axe" x="0" y="${bas - haut - 3}">${Math.round(max)}</text>`;
   "JFMAMJJASOND".split("").forEach((l, i) => {
     const x = i * 28 + 6;
-    if (prev[i] != null) { const h = prev[i] / max * H; svg += `<rect class="b1" x="${x}" y="${bas - h}" width="10" height="${h}" rx="2"/>`; }
-    if (sel[i] != null) { const h = sel[i] / max * H; svg += `<rect class="b2" x="${x + 12}" y="${bas - h}" width="10" height="${h}" rx="2"/><text class="t" x="${x + 17}" y="${bas - h - 3}">${Math.round(sel[i])}</text>`; }
-    svg += `<text class="t m" x="${x + 11}" y="141">${l}</text>`;
+    if (prev[i] != null) { const h = Math.max(2, prev[i] / max * haut); svg += `<rect class="b1" x="${x}" y="${bas - h}" width="10" height="${h}" rx="3"/>`; }
+    if (sel[i] != null) { const h = Math.max(2, sel[i] / max * haut); svg += `<rect class="b2" x="${x + 12}" y="${bas - h}" width="10" height="${h}" rx="3"/><text class="val" x="${x + 17}" y="${bas - h - 4}">${Math.round(sel[i])}</text>`; }
+    svg += `<text class="mois ${i === moisCourant ? "cour" : ""}" x="${x + 11}" y="142">${l}</text>`;
   });
-  return `<div class="carte"><div class="ligne"><h2>Consommation par mois</h2>
-      <div><button class="btn sec" data-a="annee" data-d="-1">‹</button> <b>${an}</b> <button class="btn sec" data-a="annee" data-d="1">›</button></div></div>
+  const delta = tS && tP ? Math.round((tS - tP) / tP * 100) : null;
+  return `<div class="carte">${entete("Consommation", `<div class="annee">${bouton("gauche", "annee", 'data-d="-1"', "Année précédente")}<b>${an}</b>${bouton("droite", "annee", 'data-d="1"', "Année suivante")}</div>`)}
+    <div class="chiffres"><div><b>${tS}</b><span>balles en ${an}</span></div><div><b class="doux">${tP}</b><span>en ${an - 1}</span></div>${delta !== null ? `<div><b class="${delta > 0 ? "hausse" : "baisse"}">${delta > 0 ? "+" : ""}${delta} %</b><span>vs ${an - 1}</span></div>` : ""}</div>
     <svg viewBox="0 0 340 148" class="graph" role="img" aria-label="Balles consommées par mois">${svg}</svg>
-    <div class="petit"><span class="pastille b1"></span>${an - 1} : ${tot(prev)} balles · <span class="pastille b2"></span>${an} : ${tot(sel)} balles</div>
-    <div class="petit">Balles entières, calculées entre les comptages et d'après les sorties notées.</div></div>`;
+    <div class="legende"><span><i class="b2"></i>${an}</span><span><i class="b1"></i>${an - 1}</span><span class="petit">balles entières par mois</span></div></div>`;
 }
 
 function foin() {
@@ -182,55 +274,88 @@ function foin() {
   const cs = comptages(S.foyer).reverse(), per = Object.fromEntries(periodes(S.foyer).map(p => [p.idFin, p]));
   const livs = liste(f.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const livC = liste(cop.livraisons).sort((a, b) => b.date.localeCompare(a.date));
-  const nomC = id => S.foyer.contacts?.[id]?.nom || "";
-  return graphique() + `<div class="ligne" style="margin-bottom:10px"><h2>Comptages du foin</h2><div><button class="btn sec" data-a="params">Alerte</button> <button class="btn" data-a="inventaire">+ Comptage</button></div></div>` +
-    (cs.map(c => { const p = per[c.id]; return `<div class="carte ligne" data-a="inventaire" data-id="${c.id}"><div><b>${fmtQte(+c.balles || 0)} balles</b> · ${fr(c.date)}
-      <div class="petit">${p ? p.conso < 0 ? `<span class="alerte">Incohérent depuis le ${fr(p.du)} : livraison oubliée ?</span>` : `Depuis le ${fr(p.du)} : ${fmtQte(Math.round(p.conso * 100) / 100)} balles consommées (${fmtQte(Math.round(p.rate * 100) / 100)}/jour sur ${p.jours} jours)` : "Premier comptage"}</div></div><span>›</span></div>`; }).join("") || `<p class="vide">Aucun comptage. Tu peux saisir des comptages des années passées pour la prévision.</p>`) +
-    `<div class="ligne" style="margin:18px 0 10px"><h2>Livraisons de foin</h2><button class="btn" data-a="livraison">+ Livraison</button></div>` +
-    (livs.map(l => `<div class="carte ligne" data-a="livraison" data-id="${l.id}"><div><b>${fmtQte(+l.balles || 0)} balles</b> · ${fr(l.date)}
-      <div class="petit">${l.poidsBalle ? `${l.poidsBalle} kg/balle (≈ ${Math.round(l.balles * l.poidsBalle)} kg)` : ""}${infoPrix(l)} ${esc(nomC(l.contactId))} ${esc(l.note || "")}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucune livraison.</p>`) +
-    `<div class="carte" style="margin-top:18px"><h2>Copeaux de bois</h2>
-      <div class="petit">Dernier comptage : ${cop.inventaire ? `${fmtQte(cop.inventaire.balles)} balles le ${fr(cop.inventaire.date)}` : "aucun"}</div>
-      <div class="actions"><button class="btn sec" data-a="inventaireCopeaux">Comptage</button><button class="btn" data-a="livraisonCopeaux">+ Livraison</button></div></div>` +
-    livC.map(l => `<div class="carte ligne" data-a="livraisonCopeaux" data-id="${l.id}"><div><b>${fmtQte(+l.balles || 0)} balles</b> · ${fr(l.date)}
-      <div class="petit">${infoPrix(l).replace(/^ · /, "")} ${esc(nomC(l.contactId))} ${esc(l.note || "")}</div></div><span>›</span></div>`).join("");
+  const nomC = id => esc(S.foyer.contacts?.[id]?.nom || "");
+  const lignesLiv = (l, a) => l.map(x => rangee({
+    gauche: bulle(a === "livraison" ? "blé" : "sapin", "or"), a, id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`,
+    sous: [x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
+  })).join("");
+  return graphique() +
+    `<div class="carte">${entete("Comptages du foin", bouton("reglage", "params", "", "Seuil d'alerte") + bouton("plus", "inventaire", "", "Nouveau comptage"))}
+      ${cs.length ? cs.map(c => { const p = per[c.id]; return rangee({
+        gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
+        sous: p ? (p.conso < 0 ? `<span class="q retard">Incohérent : livraison oubliée ?</span>` : `${balles(Math.round(p.conso * 100) / 100)} consommées en ${p.jours} j (${taux(p.rate)}/jour)`) : "Premier comptage"
+      }); }).join("") : `<p class="petit sobre">Aucun comptage. Tu peux saisir ceux des années passées pour affiner la prévision.</p>`}</div>
+    <div class="carte">${entete("Livraisons de foin", bouton("plus", "livraison", "", "Nouvelle livraison"))}${livs.length ? lignesLiv(livs, "livraison") : `<p class="petit sobre">Aucune livraison notée.</p>`}</div>
+    <div class="carte">${entete("Copeaux de bois", bouton("check", "inventaireCopeaux", "", "Comptage") + bouton("plus", "livraisonCopeaux", "", "Nouvelle livraison"))}
+      <p class="petit sobre">${cop.inventaire ? `Dernier comptage : <b>${balles(+cop.inventaire.balles || 0)}</b> le ${fr(cop.inventaire.date)}` : "Aucun comptage."}</p>${lignesLiv(livC, "livraisonCopeaux")}</div>`;
 }
 
+/* --- Contacts --- */
 function contacts() {
   const l = liste(S.foyer.contacts).sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
-  return `<div class="ligne" style="margin-bottom:10px"><h2>Contacts</h2><button class="btn" data-a="contact">+ Ajouter</button></div>` +
-    (l.map(c => `<div class="carte"><div class="ligne"><div><b>${esc(c.nom)}</b> <span class="petit">${esc(c.role || "")}</span></div>
-      <button class="btn sec" data-a="contact" data-id="${c.id}">Modifier</button></div>
-      <div class="petit">${c.tel ? `<a href="tel:${esc(c.tel)}">${esc(c.tel)}</a>` : ""} ${c.email ? `· <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ""}</div>
-      ${c.adresse ? `<div class="petit"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.adresse)}" target="_blank" rel="noopener">${esc(c.adresse)}</a></div>` : ""}
-      ${c.notes ? `<div class="petit">${esc(c.notes)}</div>` : ""}</div>`).join("") || `<p class="vide">Aucun contact (fournisseur de foin, vétérinaire, maréchal…).</p>`);
+  const act = (i, href, label) => `<a class="ib rond" href="${href}" aria-label="${label}" title="${label}" target="${href.startsWith("http") ? "_blank" : "_self"}" rel="noopener">${ic(i)}</a>`;
+  return (l.length ? `<div class="carte liste">${l.map(c => rangee({
+    gauche: bulle(ICONE_ROLE[c.role] || "user", "vert"), a: "contact", id: c.id, titre: esc(c.nom),
+    sous: [esc(c.role || ""), esc(c.adresse || "")].filter(Boolean).join(" · "),
+    droite: `<span class="actions-r">${c.tel ? act("tel", "tel:" + esc(c.tel), "Appeler") : ""}${c.email ? act("mail", "mailto:" + esc(c.email), "Écrire") : ""}${c.adresse ? act("pin", "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(c.adresse), "Itinéraire") : ""}</span>`
+  })).join("")}</div>` : vide("user", "Ajoute ton fournisseur de foin, ton vétérinaire, ton maréchal…", `<button class="btn" data-a="contact">${ic("plus")} Ajouter un contact</button>`)) +
+    `<button class="fab" data-a="contact" aria-label="Ajouter un contact" title="Ajouter un contact">${ic("plus")}</button>`;
 }
 
+/* --- Foyer --- */
 function reglages() {
   const m = liste(S.foyer.membres);
-  return `<div class="carte"><h2>Foyer « ${esc(S.foyer.nom)} »</h2>
-      <div class="petit">Code d'invitation à partager :</div><div class="grand">${esc(S.foyer.code)}</div></div>
-    <div class="carte"><h2>Membres</h2>${m.map(x => `<div class="petit">${esc(x.email)}</div>`).join("")}</div>
-    <div class="actions"><button class="btn sec" data-a="sortie">Se déconnecter</button></div>`;
+  return `<div class="carte centre"><div class="petit">Code d'invitation de « ${esc(S.foyer.nom)} »</div>
+      <div class="code-grand">${esc(S.foyer.code)}</div>
+      <button class="btn sec" data-a="copier">${ic("copie")} Copier le code</button></div>
+    <div class="carte">${entete("Membres")}${m.map(x => rangee({ gauche: avatar(x.email), titre: esc(x.email) })).join("")}</div>
+    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>`;
 }
 
-/* ---------- Formulaires ---------- */
-const champ = (id, lib, val = "", type = "text", extra = "") => `<label>${lib}</label><input id="${id}" type="${type}" value="${esc(val)}" ${extra}>`;
+/* ---------- Fenêtres de saisie ---------- */
+const champ = (id, lib, v = "", type = "text", extra = "") => `<div class="champ"><label for="${id}">${lib}</label><input id="${id}" type="${type}" value="${esc(v)}" ${extra}></div>`;
 const val = id => $("#" + id).value.trim();
-function ouvrir(titre, corps, onOk, onSup) {
-  const d = $("#dlg");
-  d.innerHTML = `<h2>${titre}</h2>${corps}<div class="actions">${onSup ? '<button class="btn danger" id="sup">Supprimer</button>' : ""}<button class="btn sec" id="ann">Annuler</button><button class="btn" id="ok">Enregistrer</button></div>`;
-  $("#ann").onclick = () => d.close();
-  $("#ok").onclick = async () => { await onOk(); d.close(); };
-  if (onSup) $("#sup").onclick = async () => { if (confirm("Supprimer définitivement ?")) { await onSup(); d.close(); } };
-  d.showModal();
-}
-const base = p => ref(db, `foyers/${S.fid}/${p}`);
-const ajd = () => enChaine(aujourdhui());
+const radio = n => document.querySelector(`input[name=${n}]:checked`)?.value || "";
+const pills = (nom, options, courant) => `<div class="pills">${options.map(([v, t, i]) =>
+  `<label class="pill"><input type="radio" name="${nom}" value="${esc(v)}" ${v === courant ? "checked" : ""}><span>${i ? ic(i) : ""}${t}</span></label>`).join("")}</div>`;
+const qte = (id, lib, v = "", chips = []) => `<label for="${id}">${lib}</label>
+  <div class="pas"><button type="button" class="ib" data-a="pas" data-c="${id}" data-p="-1" aria-label="Moins">−</button>
+  <input id="${id}" type="text" inputmode="decimal" value="${esc(v)}" placeholder="0"><button type="button" class="ib" data-a="pas" data-c="${id}" data-p="1" aria-label="Plus">+</button></div>
+  ${chips.length ? `<div class="chips pet">${chips.map(q => `<button type="button" class="chip" data-a="chip" data-c="${id}" data-q="${q}">${q}</button>`).join("")}</div>` : ""}`;
 
-const prixChamps = l => champ("pb", "Prix par balle (€)", l.prixBalle || "", "text", 'inputmode="decimal"') +
-  champ("pt", "Prix total (€)", l.prixTotal || "", "text", 'inputmode="decimal"') +
-  `<p class="petit">Renseigne l'un des deux : l'autre se calcule.</p>`;
+function ouvrir(titre, corps, onOk, onSup, requis = []) {
+  const d = $("#dlg");
+  d.innerHTML = `<div class="poignee"></div><div class="entete"><h2>${titre}</h2><button class="ib" id="ann" aria-label="Fermer">${ic("fermer")}</button></div>
+    <div class="formulaire">${corps}</div>
+    <div class="barre">${onSup ? `<button class="btn danger-t" id="sup">Supprimer</button>` : ""}<button class="btn plein" id="ok">Enregistrer</button></div>`;
+  $("#ann").onclick = () => d.close();
+  $("#ok").onclick = async () => {
+    for (const r of requis) if (!val(r)) { const e = $("#" + r); e.classList.add("invalide"); e.focus(); return; }
+    $("#ok").disabled = true;
+    try { await onOk(); d.close(); } catch (e) { $("#ok").disabled = false; toast("Enregistrement impossible"); }
+  };
+  if (onSup) $("#sup").onclick = async () => {
+    const b = $("#sup");
+    if (!b.dataset.sur) { b.dataset.sur = "1"; b.textContent = "Confirmer la suppression"; b.classList.add("danger"); return; }
+    await onSup(); d.close();
+  };
+  d.addEventListener("input", e => e.target.classList.remove("invalide"));
+  d.showModal();
+  const premier = d.querySelector("input[type=text]:not([readonly]), input[type=number]"); if (premier && !premier.value && matchMedia("(pointer:fine)").matches) premier.focus();
+}
+$("#dlg").addEventListener("click", e => { if (e.target === $("#dlg")) $("#dlg").close(); });
+
+let minuteur;
+function toast(msg, annuler) {
+  const t = $("#toast");
+  t.innerHTML = `<span>${msg}</span>${annuler ? `<button id="tann">${ic("retour")} Annuler</button>` : ""}`;
+  t.classList.add("visible");
+  if (annuler) $("#tann").onclick = async () => { t.classList.remove("visible"); await annuler(); };
+  clearTimeout(minuteur); minuteur = setTimeout(() => t.classList.remove("visible"), 6000);
+}
+
+const prixChamps = l => `<div class="duo">${champ("pb", "Prix par balle (€)", l.prixBalle || "", "text", 'inputmode="decimal"')}${champ("pt", "Prix total (€)", l.prixTotal || "", "text", 'inputmode="decimal"')}</div>
+  <p class="petit">Renseigne l'un des deux : l'autre se calcule.</p>`;
 function lierPrix(dernier) {
   const b = $("#b"), pb = $("#pb"), pt = $("#pt"), q = () => parseQte(b.value);
   pb.oninput = () => { dernier = "pb"; pt.value = pb.value.trim() && q() ? arr(num(pb.value) * q()) : ""; };
@@ -240,107 +365,119 @@ function lierPrix(dernier) {
     else if (pb.value.trim()) pt.value = q() ? arr(num(pb.value) * q()) : "";
   };
 }
+const options = (liste_, sel, lib = x => esc(x.nom)) => liste_.map(c => `<option value="${c.id}" ${sel === c.id ? "selected" : ""}>${lib(c)}</option>`).join("");
+
+async function noterSortie(q, date = ajd()) {
+  if (!(q > 0)) return;
+  const r = push(base("foin/sorties"));
+  await set(r, { date, balles: q, ts: Date.now() });
+  toast(`− ${balles(q)} noté`, () => remove(r));
+}
+
+/* ---------- Actions ---------- */
 const actions = {
   cheval(id) {
     const c = id ? S.foyer.chevaux[id] : { actif: true };
     ouvrir(id ? "Modifier le cheval" : "Nouveau cheval",
-      champ("n", "Nom", c.nom) + champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters"') + champ("r", "Robe", c.robe) + champ("na", "Date de naissance", c.naissance, "date") +
-            `<label>Statut</label><select id="ac"><option value="1" ${c.actif !== false ? "selected" : ""}>Actif</option><option value="0" ${c.actif === false ? "selected" : ""}>Inactif</option></select>` +
-      `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: val("ac") === "1", notes: val("no") }),
-      id && (() => update(ref(db, `foyers/${S.fid}`), Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(s => s.chevalId === id).map(s => [`soins/${s.id}`, null])]))));
+      champ("n", "Nom", c.nom, "text", 'autocomplete="off"') +
+      `<div class="duo">${champ("r", "Robe", c.robe)}${champ("na", "Naissance", c.naissance, "date")}</div>` +
+      champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters" autocomplete="off"') +
+      `<label class="interrupteur"><input type="checkbox" id="ac" ${c.actif !== false ? "checked" : ""}><span class="rail"></span>Cheval actif</label>` +
+      `<label for="no">Notes</label><textarea id="no" rows="3">${esc(c.notes)}</textarea>`,
+      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no") }),
+      id && (() => update(ref(db, `foyers/${S.fid}`), Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(s => s.chevalId === id).map(s => [`soins/${s.id}`, null])]))), ["n"]);
   },
   contact(id) {
-    const c = id ? S.foyer.contacts[id] : {};
+    const c = id ? S.foyer.contacts[id] : { role: "Fournisseur de foin" };
     ouvrir(id ? "Modifier le contact" : "Nouveau contact",
-      champ("n", "Nom", c.nom) +
-      `<label>Rôle</label><select id="ro">${["Fournisseur de foin", "Vétérinaire", "Maréchal-ferrant", "Autre"].map(r => `<option ${c.role === r ? "selected" : ""}>${r}</option>`).join("")}</select>` +
-      champ("t", "Téléphone", c.tel, "tel") + champ("e", "E-mail", c.email, "email") + champ("ad", "Adresse", c.adresse, "text", 'autocomplete="street-address"') + `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`contacts/${id}`) : push(base("contacts")), { nom: val("n"), role: val("ro"), tel: val("t"), email: val("e"), adresse: val("ad"), notes: val("no") }),
-      id && (() => remove(base(`contacts/${id}`))));
+      champ("n", "Nom", c.nom) + `<label>Rôle</label>` + pills("ro", Object.keys(ICONE_ROLE).map(r => [r, r.replace("Fournisseur de foin", "Foin").replace("Maréchal-ferrant", "Maréchal"), ICONE_ROLE[r]]), c.role || "Autre") +
+      `<div class="duo">${champ("t", "Téléphone", c.tel, "tel", 'inputmode="tel"')}${champ("e", "E-mail", c.email, "email", 'inputmode="email"')}</div>` +
+      champ("ad", "Adresse", c.adresse, "text", 'autocomplete="street-address"') + `<label for="no">Notes</label><textarea id="no" rows="2">${esc(c.notes)}</textarea>`,
+      () => set(id ? base(`contacts/${id}`) : push(base("contacts")), { nom: val("n"), role: radio("ro"), tel: val("t"), email: val("e"), adresse: val("ad"), notes: val("no") }),
+      id && (() => remove(base(`contacts/${id}`))), ["n"]);
   },
   livraison(id) {
     const l = id ? S.foyer.foin.livraisons[id] : { date: ajd() };
-    const four = liste(S.foyer.contacts).map(c => `<option value="${c.id}" ${l.contactId === c.id ? "selected" : ""}>${esc(c.nom)}</option>`).join("");
-    ouvrir(id ? "Modifier la livraison" : "Nouvelle livraison",
-      champ("d", "Date", l.date, "date") + champ("b", "Nombre de balles (ex. 40 ou 12 1/2)", l.balles === undefined ? "" : fmtQte(l.balles), "text", 'inputmode="decimal"') +
-      champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle, "number", 'min="0" step="0.5"') + prixChamps(l) +
-      `<label>Fournisseur</label><select id="c"><option value="">—</option>${four}</select>` + champ("no", "Note", l.note),
+    ouvrir(id ? "Modifier la livraison" : "Livraison de foin",
+      champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
+      champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle || "", "number", 'min="0" step="0.5" inputmode="decimal"') + prixChamps(l) +
+      `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
       () => set(id ? base(`foin/livraisons/${id}`) : push(base("foin/livraisons")), { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
-      id && (() => remove(base(`foin/livraisons/${id}`))));
+      id && (() => remove(base(`foin/livraisons/${id}`))), ["d", "b"]);
+    lierPrix(l.prixTotal ? "pt" : "pb");
+  },
+  livraisonCopeaux(id) {
+    const l = id ? S.foyer.copeaux.livraisons[id] : { date: ajd() };
+    ouvrir(id ? "Modifier la livraison" : "Livraison de copeaux",
+      champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) + prixChamps(l) +
+      `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
+      () => set(id ? base(`copeaux/livraisons/${id}`) : push(base("copeaux/livraisons")), { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
+      id && (() => remove(base(`copeaux/livraisons/${id}`))), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
   retirer(_id, d) {
-    const noter = async q => { if (q > 0) await set(push(base("foin/sorties")), { date: ajd(), balles: q, ts: Date.now() }); };
-    if (d?.q && d.q !== "autre") return noter(parseQte(d.q));
-    ouvrir("Retirer du stock", champ("b", "Quantité retirée (ex. 1/3 ou 2)", "", "text", 'inputmode="decimal"') + champ("d", "Date", ajd(), "date"),
-      () => { const q = parseQte(val("b")); return q > 0 ? set(push(base("foin/sorties")), { date: val("d") || ajd(), balles: q, ts: Date.now() }) : null; });
+    if (d?.q && d.q !== "autre") return noterSortie(parseQte(d.q));
+    ouvrir("Retirer du stock", qte("b", "Quantité retirée (balles)", "", ["1/4", "1/3", "1/2", "2/3", "1", "2"]) + champ("d", "Date", ajd(), "date"),
+      () => noterSortie(parseQte(val("b")), val("d") || ajd()), null, ["b"]);
   },
   finirBalle() {
     const p = prevision(S.foyer, aujourdhui()); if (!p) return;
     const r = p.stockAuj - Math.floor(p.stockAuj + 1e-6);
-    if (r > 0.01 && r < 0.99) return set(push(base("foin/sorties")), { date: ajd(), balles: r, ts: Date.now() });
+    if (r > 0.01 && r < 0.99) return noterSortie(r);
   },
-  vue: (_id, d) => { S.vue = d.v; rendre(); },
+  pas: (_i, d) => { const e = $("#" + d.c); e.value = fmtQte(Math.max(0, parseQte(e.value) + +d.p)); e.dispatchEvent(new Event("input", { bubbles: true })); },
+  chip: (_i, d) => { const e = $("#" + d.c); e.value = d.q; e.dispatchEvent(new Event("input", { bubbles: true })); },
+  vue: (_id, d) => { S.vue = d.v; window.scrollTo(0, 0); rendre(); },
+  filtre: (_id, d) => { S.filtre = d.f; rendre(); },
+  annee: (_id, d) => { S.annee += +d.d; rendre(); },
   async soinFait(id) {
-    const jr = ajd();
+    const s = S.foyer.soins[id], jr = ajd(), avant = s.dernier || "", r = push(base(`soins/${id}/passages`));
     await update(base(`soins/${id}`), { dernier: jr });
-    await set(push(base(`soins/${id}/passages`)), { date: jr, ts: Date.now() });
+    await set(r, { date: jr, ts: Date.now() });
+    toast(`${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, async () => { await update(base(`soins/${id}`), { dernier: avant }); await remove(r); });
   },
   soin(id) {
     const chev = liste(S.foyer.chevaux).filter(c => c.actif !== false || c.id === S.foyer.soins?.[id]?.chevalId).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
     const s = id ? S.foyer.soins[id] : { type: "vaccin", n: TYPES.vaccin.n, unite: TYPES.vaccin.unite };
-    const optC = chev.map(c => `<option value="${c.id}" ${s.chevalId === c.id ? "selected" : ""}>${esc(c.nom)}</option>`).join("");
-    const optK = liste(S.foyer.contacts).map(c => `<option value="${c.id}" ${s.contactId === c.id ? "selected" : ""}>${esc(c.nom)} (${esc(c.role || "")})</option>`).join("");
     ouvrir(id ? "Modifier le soin" : "Nouveau soin",
-      `<label>Cheval</label><select id="ch">${id ? "" : '<option value="*">Tous les chevaux actifs</option>'}${optC}</select>
-       <label>Type</label><select id="ty">${Object.entries(TYPES).map(([k, t]) => `<option value="${k}" ${s.type === k ? "selected" : ""}>${t.nom}</option>`).join("")}</select>` +
+      `<label for="ch">Cheval</label><select id="ch">${id ? "" : '<option value="*">Tous les chevaux actifs</option>'}${options(chev, s.chevalId)}</select>
+       <label>Type de soin</label>${pills("ty", Object.entries(TYPES).map(([k, t]) => [k, t.nom, ICONE_SOIN[k]]), s.type)}` +
       champ("li", "Précision (ex. Grippe, Tétanos)", s.libelle) +
-      `<label>Périodicité : tous les</label><div class="ligne"><input id="pn" type="number" min="1" value="${s.n || 1}"><select id="pu"><option value="sem" ${s.unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${s.unite !== "sem" ? "selected" : ""}>mois</option></select></div>` +
-      champ("de", "Dernier passage", s.dernier, "date") + champ("pr", "Première échéance (si aucun passage noté)", s.premiere, "date") +
-      `<label>Intervenant</label><select id="co"><option value="">—</option>${optK}</select>` + champ("no", "Note", s.note),
+      `<label>Périodicité : tous les</label><div class="duo"><input id="pn" type="number" min="1" inputmode="numeric" value="${s.n || 1}"><select id="pu"><option value="sem" ${s.unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${s.unite !== "sem" ? "selected" : ""}>mois</option></select></div>` +
+      `<div class="duo">${champ("de", "Dernier passage", s.dernier, "date")}${champ("pr", "1re échéance", s.premiere, "date")}</div><p class="petit">La 1re échéance sert tant qu'aucun passage n'est noté.</p>` +
+      `<label for="co">Intervenant</label><select id="co"><option value="">—</option>${options(liste(S.foyer.contacts), s.contactId, c => `${esc(c.nom)} (${esc(c.role || "")})`)}</select>` + champ("no", "Note", s.note),
       async () => {
-        const o = { type: val("ty"), libelle: val("li"), n: +val("pn") || 1, unite: val("pu"), dernier: val("de"), premiere: val("pr"), contactId: val("co"), note: val("no") };
+        const o = { type: radio("ty"), libelle: val("li"), n: +val("pn") || 1, unite: val("pu"), dernier: val("de"), premiere: val("pr"), contactId: val("co"), note: val("no") };
         if (id) return update(base(`soins/${id}`), { ...o, chevalId: val("ch") });
         const cibles = val("ch") === "*" ? chev.filter(c => c.actif !== false).map(c => c.id) : [val("ch")];
         for (const cid of cibles) await set(push(base("soins")), { ...o, chevalId: cid });
       },
       id && (() => remove(base(`soins/${id}`))));
-    $("#ty").onchange = () => { if (!id) { const t = TYPES[val("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; } };
+    document.querySelectorAll("input[name=ty]").forEach(r => r.onchange = () => { if (!id) { const t = TYPES[radio("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; } });
   },
-  annee: (_id, d) => { S.annee += +d.d; rendre(); },
-  annulerSortie: id => remove(base(`foin/sorties/${id}`)),
   inventaire(id) {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
-    ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées (ex. 25 ou 12 1/3)", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
+    ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
       () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; return set(id ? base(chemin) : push(base("foin/inventaires")), o); },
-      id && (() => remove(base(chemin))));
-  },
-  params() {
-    const f = S.foyer.foin || {};
-    ouvrir("Alerte de stock", champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1"'),
-      () => update(base("foin"), { seuilJours: +val("s") || 14 }));
+      id && (() => remove(base(chemin))), ["d", "b"]);
   },
   inventaireCopeaux() {
     const i = S.foyer.copeaux?.inventaire || { date: ajd() };
-    ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
-      () => set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) }));
+    ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
+      () => set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) }), null, ["b"]);
   },
-  livraisonCopeaux(id) {
-    const l = id ? S.foyer.copeaux.livraisons[id] : { date: ajd() };
-    const four = liste(S.foyer.contacts).map(c => `<option value="${c.id}" ${l.contactId === c.id ? "selected" : ""}>${esc(c.nom)}</option>`).join("");
-    ouvrir(id ? "Modifier la livraison" : "Livraison de copeaux",
-      champ("d", "Date", l.date, "date") + champ("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles), "text", 'inputmode="decimal"') + prixChamps(l) +
-      `<label>Fournisseur</label><select id="c"><option value="">—</option>${four}</select>` + champ("no", "Note", l.note),
-      () => set(id ? base(`copeaux/livraisons/${id}`) : push(base("copeaux/livraisons")), { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
-      id && (() => remove(base(`copeaux/livraisons/${id}`))));
-    lierPrix(l.prixTotal ? "pt" : "pb");
+  params() {
+    const f = S.foyer.foin || {};
+    ouvrir("Seuil d'alerte", `<p class="petit">L'accueil passe en alerte quand il reste moins de ce nombre de jours de foin.</p>` + champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"'),
+      () => update(base("foin"), { seuilJours: +val("s") || 14 }));
   },
+  copier: () => navigator.clipboard?.writeText(S.foyer.code).then(() => toast("Code copié")),
   sortie: () => signOut(auth).then(() => location.reload())
 };
 
 document.addEventListener("click", e => {
+  if (e.target.closest("a:not([data-a])")) return;
   const el = e.target.closest("[data-a]");
   if (!el || !S.foyer) return;
   e.stopPropagation(); e.preventDefault();
