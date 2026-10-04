@@ -24,3 +24,8 @@ dialog::backdrop{background:#0006}
 .vide{text-align:center;color:#566;padding:24px}
 .rapide{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .rapide .btn{flex:1;min-width:64px}
+.graph{width:100%;height:auto;margin:8px 0}
+.b1{fill:#c7d3c2}.b2{fill:var(--vert)}
+.graph .t{font:9px system-ui,sans-serif;fill:#334;text-anchor:middle}.graph .m{fill:#667}
+.pastille{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+.bientot{color:#b36b00}

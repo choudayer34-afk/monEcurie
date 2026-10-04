@@ -5,6 +5,7 @@ import { getDatabase, ref, get, set, push, remove, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { jour, enChaine, liste, comptages, periodes, prevision, consoMensuelle } from "./prevision.js";
+import { TYPES, libelleSoin, echeance, joursAvant } from "./soins.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -87,12 +88,12 @@ function ecranFoyer() {
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; rendre(); });
-const vues = { accueil, chevaux, foin, contacts, reglages };
+const vues = { accueil, chevaux, soins, foin, contacts, reglages };
 
 function rendre() {
   if (!S.foyer) return;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === S.vue));
-  $("#titre").textContent = { accueil: "Accueil", chevaux: "Chevaux", foin: "Stock", contacts: "Contacts", reglages: "Foyer" }[S.vue];
+  $("#titre").textContent = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer" }[S.vue];
   $("#vue").innerHTML = vues[S.vue]();
 }
 
@@ -118,7 +119,35 @@ function accueil() {
       <button class="btn sec" data-a="retirer" data-q="autre">− …</button><button class="btn" data-a="inventaire">Comptage</button></div>
       ${sorties[0] ? `<div class="petit" style="margin-top:8px">Dernière sortie : ${fmtQte(+sorties[0].balles || 0)} le ${fr(sorties[0].date)} · <a href="#" data-a="annulerSortie" data-id="${sorties[0].id}">annuler</a>${p.sorties ? ` · ${fmtQte(p.sorties)} balles sorties depuis le comptage` : ""}</div>` : ""}` : "";
   return `<div class="carte"><h2>Foin</h2>${bloc}${rapide}</div>
+    ${soinsAccueil()}
     <div class="carte ligne"><span>Chevaux actifs</span><b>${nb}</b></div>`;
+}
+
+const nomCheval = id => S.foyer.chevaux?.[id]?.nom || "Cheval supprimé";
+const quand = j => (j < 0 ? `en retard de ${-j} j` : j === 0 ? "aujourd'hui" : `dans ${j} j`);
+const classeSoin = j => (j === null ? "" : j < 0 ? "alerte" : j <= 30 ? "bientot" : "");
+function soinsPrevus() {
+  const auj = aujourdhui();
+  return liste(S.foyer.soins).filter(s => S.foyer.chevaux?.[s.chevalId])
+    .map(s => { const ech = echeance(s); return { ...s, ech, j: joursAvant(ech, auj) }; })
+    .sort((x, y) => (x.ech === null) - (y.ech === null) || (x.ech || "").localeCompare(y.ech || ""));
+}
+function carteSoin(s, fait = true) {
+  return `<div class="carte ligne" data-a="soin" data-id="${s.id}"><div><b>${esc(libelleSoin(s))}</b> · ${esc(nomCheval(s.chevalId))}
+    <div class="petit">Dernier : ${s.dernier ? fr(s.dernier) : "jamais"} · Prochain : ${s.ech ? fr(s.ech) : "à planifier"}</div>
+    ${s.j !== null ? `<div class="petit ${classeSoin(s.j)}">${quand(s.j)}</div>` : ""}</div>
+    ${fait ? `<button class="btn sec" data-a="soinFait" data-id="${s.id}">Fait</button>` : ""}</div>`;
+}
+function soinsAccueil() {
+  const tous = soinsPrevus(); if (!tous.length) return "";
+  const a = tous.filter(s => s.j !== null && s.j <= 30);
+  return `<h2 style="margin:16px 0 8px">Soins à prévoir</h2>` + (a.length ? a.slice(0, 6).map(s => carteSoin(s)).join("") : `<div class="carte petit">Rien à prévoir dans les 30 jours.</div>`) +
+    (a.length > 6 ? `<p class="petit"><a href="#" data-a="vue" data-v="soins">Voir les ${a.length} soins</a></p>` : "");
+}
+function soins() {
+  const l = soinsPrevus();
+  return `<div class="ligne" style="margin-bottom:10px"><h2>Soins</h2><button class="btn" data-a="soin">+ Soin</button></div>` +
+    (l.map(s => carteSoin(s)).join("") || `<p class="vide">Aucun soin suivi (vaccins, vermifuge, dentiste, ferrure).</p>`);
 }
 
 function chevaux() {
@@ -219,7 +248,7 @@ const actions = {
             `<label>Statut</label><select id="ac"><option value="1" ${c.actif !== false ? "selected" : ""}>Actif</option><option value="0" ${c.actif === false ? "selected" : ""}>Inactif</option></select>` +
       `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
       () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: val("ac") === "1", notes: val("no") }),
-      id && (() => remove(base(`chevaux/${id}`))));
+      id && (() => update(ref(db, `foyers/${S.fid}`), Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(s => s.chevalId === id).map(s => [`soins/${s.id}`, null])]))));
   },
   contact(id) {
     const c = id ? S.foyer.contacts[id] : {};
@@ -251,6 +280,33 @@ const actions = {
     const p = prevision(S.foyer, aujourdhui()); if (!p) return;
     const r = p.stockAuj - Math.floor(p.stockAuj + 1e-6);
     if (r > 0.01 && r < 0.99) return set(push(base("foin/sorties")), { date: ajd(), balles: r, ts: Date.now() });
+  },
+  vue: (_id, d) => { S.vue = d.v; rendre(); },
+  async soinFait(id) {
+    const jr = ajd();
+    await update(base(`soins/${id}`), { dernier: jr });
+    await set(push(base(`soins/${id}/passages`)), { date: jr, ts: Date.now() });
+  },
+  soin(id) {
+    const chev = liste(S.foyer.chevaux).filter(c => c.actif !== false || c.id === S.foyer.soins?.[id]?.chevalId).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
+    const s = id ? S.foyer.soins[id] : { type: "vaccin", n: TYPES.vaccin.n, unite: TYPES.vaccin.unite };
+    const optC = chev.map(c => `<option value="${c.id}" ${s.chevalId === c.id ? "selected" : ""}>${esc(c.nom)}</option>`).join("");
+    const optK = liste(S.foyer.contacts).map(c => `<option value="${c.id}" ${s.contactId === c.id ? "selected" : ""}>${esc(c.nom)} (${esc(c.role || "")})</option>`).join("");
+    ouvrir(id ? "Modifier le soin" : "Nouveau soin",
+      `<label>Cheval</label><select id="ch">${id ? "" : '<option value="*">Tous les chevaux actifs</option>'}${optC}</select>
+       <label>Type</label><select id="ty">${Object.entries(TYPES).map(([k, t]) => `<option value="${k}" ${s.type === k ? "selected" : ""}>${t.nom}</option>`).join("")}</select>` +
+      champ("li", "Précision (ex. Grippe, Tétanos)", s.libelle) +
+      `<label>Périodicité : tous les</label><div class="ligne"><input id="pn" type="number" min="1" value="${s.n || 1}"><select id="pu"><option value="sem" ${s.unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${s.unite !== "sem" ? "selected" : ""}>mois</option></select></div>` +
+      champ("de", "Dernier passage", s.dernier, "date") + champ("pr", "Première échéance (si aucun passage noté)", s.premiere, "date") +
+      `<label>Intervenant</label><select id="co"><option value="">—</option>${optK}</select>` + champ("no", "Note", s.note),
+      async () => {
+        const o = { type: val("ty"), libelle: val("li"), n: +val("pn") || 1, unite: val("pu"), dernier: val("de"), premiere: val("pr"), contactId: val("co"), note: val("no") };
+        if (id) return update(base(`soins/${id}`), { ...o, chevalId: val("ch") });
+        const cibles = val("ch") === "*" ? chev.filter(c => c.actif !== false).map(c => c.id) : [val("ch")];
+        for (const cid of cibles) await set(push(base("soins")), { ...o, chevalId: cid });
+      },
+      id && (() => remove(base(`soins/${id}`))));
+    $("#ty").onchange = () => { if (!id) { const t = TYPES[val("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; } };
   },
   annee: (_id, d) => { S.annee += +d.d; rendre(); },
   annulerSortie: id => remove(base(`foin/sorties/${id}`)),

@@ -1,5 +1,5 @@
 const CACHE = 'ecurie-v1';
-const FICHIERS = ['./', 'index.html', 'styles.css', 'app.js', 'prevision.js', 'firebase-config.js', 'manifest.webmanifest'];
+const FICHIERS = ['./', 'index.html', 'styles.css', 'app.js', 'prevision.js', 'soins.js', 'firebase-config.js', 'manifest.webmanifest'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FICHIERS))));
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys().then(k => Promise.all(k.filter(n => n !== CACHE).map(n => caches.delete(n))))

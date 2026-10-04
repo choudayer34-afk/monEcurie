@@ -1,0 +1,28 @@
+// Soins des chevaux : types, périodicité et calcul de la prochaine échéance.
+import { jour, enChaine } from "./prevision.js";
+
+export const TYPES = {
+  vaccin: { nom: "Vaccin", n: 6, unite: "mois" },
+  vermifuge: { nom: "Vermifuge", n: 3, unite: "mois" },
+  dentiste: { nom: "Dentiste", n: 12, unite: "mois" },
+  ferrure: { nom: "Ferrure", n: 8, unite: "sem" }
+};
+
+export const libelleSoin = s => (TYPES[s.type]?.nom || "Soin") + (s.libelle ? " · " + s.libelle : "");
+
+export function ajouter(date, n, unite) {
+  if (unite === "sem") return enChaine(jour(date) + 7 * n);
+  const y = +date.slice(0, 4), m = +date.slice(5, 7) - 1, d = +date.slice(8, 10);
+  const cible = new Date(Date.UTC(y, m + n, 1));
+  const dernierJour = new Date(Date.UTC(cible.getUTCFullYear(), cible.getUTCMonth() + 1, 0)).getUTCDate();
+  cible.setUTCDate(Math.min(d, dernierJour));
+  return cible.toISOString().slice(0, 10);
+}
+
+// Prochaine échéance : dernier passage + périodicité, sinon la date de première échéance saisie
+export function echeance(s) {
+  if (s.dernier) return ajouter(s.dernier, +s.n || 1, s.unite || "mois");
+  return s.premiere || null;
+}
+
+export const joursAvant = (ech, auj) => (ech ? jour(ech) - auj : null);
