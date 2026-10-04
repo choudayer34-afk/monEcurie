@@ -248,3 +248,22 @@ input[type=search]{-webkit-appearance:none;appearance:none}
 .intro-c p{color:var(--doux);margin-bottom:18px;line-height:1.5}
 .points{display:flex;gap:7px;justify-content:center;margin-bottom:18px}
 .points i{width:8px;height:8px;border-radius:50%;background:var(--sable)}.points i.actif{background:var(--prim);width:22px;border-radius:9px}
+
+/* Pile de balles, commande, budget, fiche */
+.pile{display:flex;flex-wrap:wrap;gap:4px;margin-top:16px;position:relative}
+.bl{width:26px;height:17px;flex:none}
+.bl .bv{fill:#ffffff30}.bl .bp{fill:#eabb4c}.bl .bs{stroke:#a8741c;stroke-width:1.300;stroke-linecap:round;fill:none;opacity:.8}
+.bl.fantome{animation:chute 1s ease-in forwards}
+@keyframes chute{from{opacity:.95;transform:translateY(0) rotate(0)}to{opacity:0;transform:translateY(18px) rotate(12deg)}}
+.legende-h{font-size:.75rem;opacity:.8;margin-top:6px}
+.commande .grand-q{font-size:2.2rem;font-weight:800;color:var(--or-t);line-height:1.1;margin:2px 0}
+.commande .grand-q small{font-size:1rem;font-weight:600}
+.commande.ok{display:flex;align-items:center;gap:12px}
+.commande .duo{margin-top:12px}
+.commande .duo a.btn{text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b2.or{fill:var(--or);background:var(--or)}
+.fiche-t{display:flex;align-items:center;gap:14px}
+.fiche-t h2{font-size:1.35rem}
+.fiche-t .corps{flex:1;min-width:0}
+.avatar.grand{width:64px;height:64px;font-size:1.7rem}
+.petit-b{min-height:40px;padding:0 14px;font-size:.9rem}

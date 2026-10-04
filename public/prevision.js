@@ -73,3 +73,30 @@ export function prevision(f, auj) {
     jours: historique && rupture ? Math.max(0, rupture - auj) : null
   };
 }
+
+// Taux de consommation par jour, mois par mois, d'après les comptages passés
+function tauxMois(f) {
+  const sum = Array(12).fill(0), n = Array(12).fill(0); let tot = 0, totN = 0;
+  for (const p of periodes(f)) {
+    if (p.conso < 0) continue;
+    for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += p.rate; n[m]++; tot += p.rate; totN++; }
+  }
+  const moy = totN ? tot / totN : 0;
+  return { historique: totN > 0, taux: m => (n[m] ? sum[m] / n[m] : moy) };
+}
+
+// Balles à prévoir sur les N prochains jours (null s'il n'y a pas encore d'historique)
+export function consoPrevue(f, auj, jours) {
+  const { historique, taux } = tauxMois(f); if (!historique) return null;
+  let t = 0; for (let i = 1; i <= jours; i++) t += taux(new Date((auj + i) * 864e5).getUTCMonth());
+  return t;
+}
+
+// Dépenses par mois (clé AAAA-MM) : { foin, copeaux }
+export function depensesMensuelles(f) {
+  const m = {}, prix = l => +l.prixTotal || (+l.prixBalle || 0) * (+l.balles || 0);
+  const ajouter = (l, k) => { if (!l.date || !prix(l)) return; const c = l.date.slice(0, 7); (m[c] = m[c] || { foin: 0, copeaux: 0 })[k] += prix(l); };
+  liste(f.foin?.livraisons).forEach(l => ajouter(l, "foin"));
+  liste(f.copeaux?.livraisons).forEach(l => ajouter(l, "copeaux"));
+  return m;
+}

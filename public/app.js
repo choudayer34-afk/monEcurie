@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, remove, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, comptages, periodes, prevision, consoMensuelle } from "./prevision.js";
+import { jour, enChaine, liste, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles } from "./prevision.js";
 import { TYPES, libelleSoin, echeance, joursAvant } from "./soins.js";
 
 const app = initializeApp(firebaseConfig);
@@ -14,7 +14,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear(), filtre: "tous", install: null };
+const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear(), filtre: "tous", install: null, cheval: null, stockPrec: null, ghost: null };
 
 /* ---------- Icônes ---------- */
 const I = {
@@ -177,14 +177,15 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const vues = { accueil, chevaux, soins, foin, contacts, reglages, journal };
+const vues = { accueil, chevaux, soins, foin, contacts, reglages, journal, fiche };
 const TITRES = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité" };
 
 function rendre() {
   if (!S.foyer) return;
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === S.vue));
+  if (S.vue === "fiche" && !S.foyer.chevaux?.[S.cheval]) S.vue = "chevaux";
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" ? "chevaux" : S.vue)));
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
-  $("#titre").textContent = TITRES[S.vue];
+  $("#titre").textContent = S.vue === "fiche" ? nomCheval(S.cheval) : TITRES[S.vue];
   $("#sous").textContent = {
     accueil: new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
     chevaux: `${nbC} ${nbC > 1 ? "chevaux actifs" : "cheval actif"}`,
@@ -192,7 +193,8 @@ function rendre() {
     foin: "Foin et copeaux",
     contacts: "Fournisseurs et soignants",
     reglages: "Partage et compte",
-    journal: "Ce que fait la famille"
+    journal: "Ce que fait la famille",
+    fiche: "Fiche du cheval"
   }[S.vue];
   const y = window.scrollY;
   $("#vue").innerHTML = vues[S.vue]();
@@ -200,7 +202,15 @@ function rendre() {
 }
 
 /* --- Accueil --- */
-function hero(p, seuil) {
+const balleSvg = (f = 1, cl = "", st = "") => `<svg class="bl ${cl}" ${st} viewBox="0 0 28 18" aria-hidden="true"><rect class="bv" x="1" y="1" width="26" height="16" rx="3.500"/>${f >= 0.04 ? `<rect class="bp" x="1" y="1" width="${(26 * Math.min(f, 1)).toFixed(1)}" height="16" rx="3.500"/>` : ""}${[9, 19].filter(x => x < 26 * f).map(x => `<path class="bs" d="M${x} 1v16"/>`).join("")}</svg>`;
+function pile(stock, g) {
+  const unite = stock <= 60 ? 1 : stock <= 300 ? 5 : 10, total = Math.max(0, stock) / unite, entiers = Math.floor(total + 1e-9), frac = total - entiers;
+  let h = ""; for (let i = 0; i < entiers; i++) h += balleSvg(1);
+  if (frac > 0.04) h += balleSvg(frac);
+  if (g) for (let i = 0; i < g.n; i++) h += balleSvg(1, "fantome", `style="animation-delay:-${g.ecoule}ms"`);
+  return `<div class="pile" role="img" aria-label="${fmtQte(stock)} balles en stock">${h}</div>${unite > 1 ? `<p class="legende-h">1 icône = ${unite} balles</p>` : ""}`;
+}
+function hero(p, seuil, g) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
     <p class="hero-s">Compte tes balles pour démarrer le suivi du stock.</p><button class="btn or" data-a="inventaire">Premier comptage</button></section>`;
   const prev = p.historique, bas = prev && p.jours !== null && p.jours <= seuil, mid = prev && !bas && p.jours !== null && p.jours <= seuil * 2;
@@ -212,7 +222,24 @@ function hero(p, seuil) {
       <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
       <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
     : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div><p class="hero-s">Au comptage du ${fr(p.last.date)}, livraisons comprises.</p>`}
+  ${pile(p.stockAuj, g)}
   </section>`;
+}
+
+function carteCommande(p) {
+  if (!p?.historique) return "";
+  const f = S.foyer.foin || {}, seuil = +f.seuilJours || 14, N = +f.couvertureJours || 90, auj = aujourdhui();
+  const besoin = consoPrevue(S.foyer, auj, N); if (besoin == null) return "";
+  const manque = besoin - p.stockAuj, qte = Math.ceil(Math.max(0, manque) / 5) * 5;
+  const avant = p.rupture ? enChaine(Math.max(auj, jour(p.rupture) - seuil)) : null;
+  const livs = liste(f.livraisons).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
+  const dernier = livs.find(l => l.contactId && S.foyer.contacts?.[l.contactId]), four = (dernier && S.foyer.contacts[dernier.contactId]) || liste(S.foyer.contacts).find(c => c.role === "Fournisseur de foin");
+  const pl = livs.find(l => +l.prixBalle || (+l.prixTotal && +l.balles)), prixBalle = pl ? (+pl.prixBalle || +pl.prixTotal / +pl.balles) : 0;
+  if (manque <= 0) return `<div class="carte commande ok">${bulle("check", "vert")}<div><b>Stock suffisant pour ${N} jours</b><div class="petit">Consommation prévue : environ ${Math.round(besoin)} balles.</div></div></div>`;
+  return `<div class="carte commande">${entete("Commande conseillée", bouton("reglage", "params", "", "Réglages du stock"))}
+    <div class="grand-q">≈ ${qte} <small>balles</small></div>
+    <p class="petit">pour tenir ${N} jours${avant ? `, à commander avant le <b>${fr(avant)}</b>` : ""}${prixBalle ? ` · environ ${euro(prixBalle * qte)} (${euro(prixBalle)}/balle)` : ""}</p>
+    <div class="duo">${four?.tel ? `<a class="btn sec" href="tel:${esc(four.tel)}">${ic("tel")} ${esc(four.nom)}</a>` : `<span></span>`}<button class="btn" data-a="livraison">${ic("plus")} Livraison</button></div></div>`;
 }
 
 function statistiques(nbC, plan) {
@@ -236,7 +263,11 @@ function accueil() {
   const p = prevision(S.foyer, aujourdhui()), seuil = +(S.foyer.foin?.seuilJours) || 14;
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length, plan = soinsPrevus();
   const urgents = plan.filter(s => s.j !== null && s.j <= 30);
-  return hero(p, seuil) + statistiques(nbC, plan) + (p ? rapide(p) : "") +
+  const now = Date.now();
+  if (p && S.stockPrec != null && S.stockPrec - p.stockAuj > 0.05 && S.stockPrec - p.stockAuj < 6) S.ghost = { n: Math.min(3, Math.ceil(S.stockPrec - p.stockAuj - 1e-6)), t: now };
+  if (p) S.stockPrec = p.stockAuj;
+  const ghost = S.ghost && now - S.ghost.t < 1100 ? { n: S.ghost.n, ecoule: now - S.ghost.t } : null;
+  return hero(p, seuil, ghost) + statistiques(nbC, plan) + (p ? rapide(p) : "") + carteCommande(p) +
     (plan.length ? `<div class="carte">${entete("Soins à prévoir", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
       ${urgents.length ? urgents.slice(0, 5).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
       ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + activiteRecente();
@@ -276,10 +307,10 @@ function soinsPrevus() {
     .sort((x, y) => (x.ech === null) - (y.ech === null) || (x.ech || "").localeCompare(y.ech || ""));
 }
 const urgence = j => (j === null ? "neutre" : j < 0 ? "retard" : j <= 30 ? "bientot" : "ok");
-function ligneSoin(s) {
+function ligneSoin(s, avecCheval = true) {
   return `<div class="glisse"><div class="fond">${ic("check")} Fait</div>` + rangee({
     gauche: bulle(ICONE_SOIN[s.type] || "croix", urgence(s.j)), classe: `u-${urgence(s.j)}`, a: "soin", id: s.id,
-    titre: `${esc(libelleSoin(s))} · ${esc(S.foyer.chevaux[s.chevalId].nom)}`,
+    titre: `${esc(libelleSoin(s))}${avecCheval ? " · " + esc(S.foyer.chevaux[s.chevalId].nom) : ""}`,
     sous: s.j === null ? "À planifier" : `<span class="q ${urgence(s.j)}">${quand(s.j)}</span> · ${frCourt(s.ech)}${s.dernier ? ` · fait le ${frCourt(s.dernier)}` : ""}`,
     droite: `<button class="fait" data-a="soinFait" data-id="${s.id}" aria-label="Marquer comme fait" title="Fait aujourd'hui">${ic("check")}</button>`
   }) + `</div>`;
@@ -301,7 +332,7 @@ function chevaux() {
   return (l.length ? `<div class="carte liste">${l.map(c => {
     const prochain = plan.find(s => s.chevalId === c.id && s.j !== null);
     return rangee({
-      gauche: avatar(c.nom), classe: c.actif === false ? "inactif" : "", a: "cheval", id: c.id, titre: esc(c.nom),
+      gauche: avatar(c.nom), classe: c.actif === false ? "inactif" : "", a: "fiche", id: c.id, titre: esc(c.nom),
       sous: [esc(c.robe || ""), age(c.naissance), c.sire ? "SIRE " + esc(c.sire) : "", c.actif === false ? "inactif" : ""].filter(Boolean).join(" · ") || "Fiche à compléter",
       droite: prochain ? `<span class="badge ${urgence(prochain.j)}">${ic(ICONE_SOIN[prochain.type])}${quand(prochain.j)}</span>` : `<span class="chev">${ic("droite")}</span>`
     });
@@ -309,25 +340,67 @@ function chevaux() {
     `<button class="fab" data-a="cheval" aria-label="Ajouter un cheval" title="Ajouter un cheval">${ic("plus")}</button>`;
 }
 
+function fiche() {
+  const c = S.foyer.chevaux[S.cheval], plan = soinsPrevus().filter(s => s.chevalId === S.cheval);
+  const hist = [];
+  liste(S.foyer.soins).filter(s => s.chevalId === S.cheval).forEach(s => {
+    const dates = new Set();
+    liste(s.passages).forEach(p => { if (p.date) { dates.add(p.date); hist.push({ date: p.date, s }); } });
+    if (s.dernier && !dates.has(s.dernier)) hist.push({ date: s.dernier, s });
+  });
+  hist.sort((x, y) => y.date.localeCompare(x.date));
+  const infos = [c.robe && esc(c.robe), c.naissance && `${age(c.naissance)} (né le ${fr(c.naissance)})`, c.sire && "SIRE " + esc(c.sire), c.actif === false && "inactif"].filter(Boolean);
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="chevaux">${ic("gauche")} Chevaux</button></div>
+    <div class="carte fiche-t"><span class="avatar grand a${teinte(c.nom)}">${esc((c.nom || "?").charAt(0).toUpperCase())}</span>
+      <div class="corps"><h2>${esc(c.nom)}</h2><div class="petit">${infos.join(" · ") || "Fiche à compléter"}</div></div>
+      ${bouton("crayon", "cheval", `data-id="${S.cheval}"`, "Modifier la fiche")}</div>
+    <div class="carte">${entete("Soins à prévoir", `<button class="btn sec petit-b" data-a="soin" data-cheval="${S.cheval}">${ic("plus")} Soin</button>`)}
+      ${plan.length ? plan.map(s => ligneSoin(s, false)).join("") : `<p class="petit sobre">Aucun soin suivi pour ${esc(c.nom)}.</p>`}</div>
+    <div class="carte">${entete("Historique des soins")}
+      ${hist.length ? hist.slice(0, 40).map(h => rangee({ gauche: bulle(ICONE_SOIN[h.s.type] || "croix"), titre: esc(libelleSoin(h.s)), sous: fr(h.date) })).join("") : `<p class="petit sobre">Les passages notés avec le bouton ✓ apparaîtront ici.</p>`}</div>
+    ${c.notes ? `<div class="carte">${entete("Notes")}<p>${esc(c.notes)}</p></div>` : ""}`;
+}
+
 /* --- Stock --- */
-function graphique() {
-  const m = consoMensuelle(S.foyer), an = S.annee, cle = (y, i) => `${y}-${String(i + 1).padStart(2, "0")}`;
-  const sel = [...Array(12)].map((_, i) => m[cle(an, i)]), prev = [...Array(12)].map((_, i) => m[cle(an - 1, i)]);
-  const max = Math.max(1, ...sel.filter(x => x != null), ...prev.filter(x => x != null));
-  const haut = 100, bas = 124, moisCourant = new Date().getFullYear() === an ? new Date().getMonth() : -1;
-  const tot = t => Math.round(t.reduce((s, x) => s + (x || 0), 0)), tS = tot(sel), tP = tot(prev);
+function svgBarres(sel, prev, max, nom = "") {
+  const haut = 100, bas = 124, moisCourant = new Date().getFullYear() === S.annee ? new Date().getMonth() : -1;
   let svg = [0.5, 1].map(f => `<line x1="0" x2="340" y1="${bas - f * haut}" y2="${bas - f * haut}" class="grille"/>`).join("") + `<text class="axe" x="0" y="${bas - haut - 3}">${Math.round(max)}</text>`;
   "JFMAMJJASOND".split("").forEach((l, i) => {
     const x = i * 28 + 6;
     if (prev[i] != null) { const h = Math.max(2, prev[i] / max * haut); svg += `<rect class="b1" x="${x}" y="${bas - h}" width="10" height="${h}" rx="3"/>`; }
-    if (sel[i] != null) { const h = Math.max(2, sel[i] / max * haut); svg += `<rect class="b2" x="${x + 12}" y="${bas - h}" width="10" height="${h}" rx="3"/><text class="val" x="${x + 17}" y="${bas - h - 4}">${Math.round(sel[i])}</text>`; }
+    if (sel[i] != null) { const h = Math.max(2, sel[i] / max * haut); svg += `<rect class="b2 ${nom}" x="${x + 12}" y="${bas - h}" width="10" height="${h}" rx="3"/><text class="val" x="${x + 17}" y="${bas - h - 4}">${Math.round(sel[i])}</text>`; }
     svg += `<text class="mois ${i === moisCourant ? "cour" : ""}" x="${x + 11}" y="142">${l}</text>`;
   });
-  const delta = tS && tP ? Math.round((tS - tP) / tP * 100) : null;
-  return `<div class="carte">${entete("Consommation", `<div class="annee">${bouton("gauche", "annee", 'data-d="-1"', "Année précédente")}<b>${an}</b>${bouton("droite", "annee", 'data-d="1"', "Année suivante")}</div>`)}
-    <div class="chiffres"><div><b>${tS}</b><span>balles en ${an}</span></div><div><b class="doux">${tP}</b><span>en ${an - 1}</span></div>${delta !== null ? `<div><b class="${delta > 0 ? "hausse" : "baisse"}">${delta > 0 ? "+" : ""}${delta} %</b><span>vs ${an - 1}</span></div>` : ""}</div>
-    <svg viewBox="0 0 340 148" class="graph" role="img" aria-label="Balles consommées par mois">${svg}</svg>
+  return svg;
+}
+const selecteurAnnee = an => `<div class="annee">${bouton("gauche", "annee", 'data-d="-1"', "Année précédente")}<b>${an}</b>${bouton("droite", "annee", 'data-d="1"', "Année suivante")}</div>`;
+const serie = (m, an, f = x => x) => [...Array(12)].map((_, i) => { const v = m[`${an}-${String(i + 1).padStart(2, "0")}`]; return v == null ? null : f(v); });
+const total = t => Math.round(t.reduce((s, x) => s + (x || 0), 0));
+const evolution = (a, b) => a && b ? Math.round((a - b) / b * 100) : null;
+const chiffre = (v, l, c = "") => `<div><b class="${c}">${v}</b><span>${l}</span></div>`;
+
+function graphique() {
+  const m = consoMensuelle(S.foyer), an = S.annee, sel = serie(m, an), prev = serie(m, an - 1);
+  const max = Math.max(1, ...sel.filter(x => x != null), ...prev.filter(x => x != null)), tS = total(sel), tP = total(prev), d = evolution(tS, tP);
+  return `<div class="carte">${entete("Consommation", selecteurAnnee(an))}
+    <div class="chiffres">${chiffre(tS, `balles en ${an}`)}${chiffre(tP, `en ${an - 1}`, "doux")}${d !== null ? chiffre(`${d > 0 ? "+" : ""}${d} %`, `vs ${an - 1}`, d > 0 ? "hausse" : "baisse") : ""}</div>
+    <svg viewBox="0 0 340 148" class="graph" role="img" aria-label="Balles consommées par mois">${svgBarres(sel, prev, max)}</svg>
     <div class="legende"><span><i class="b2"></i>${an}</span><span><i class="b1"></i>${an - 1}</span><span class="petit">balles entières par mois</span></div></div>`;
+}
+
+function budget() {
+  const dep = depensesMensuelles(S.foyer), an = S.annee, tout = x => (x ? x.foin + x.copeaux : null);
+  const cle = y => Object.keys(dep).filter(k => k.startsWith(y + "-"));
+  if (!Object.keys(dep).length) return `<div class="carte">${entete("Budget")}<p class="petit sobre">Note le prix dans tes livraisons de foin et de copeaux pour suivre tes dépenses.</p></div>`;
+  const sel = serie(dep, an, tout), prev = serie(dep, an - 1, tout), max = Math.max(1, ...sel.filter(x => x != null), ...prev.filter(x => x != null));
+  const tS = total(sel), tP = total(prev), d = evolution(tS, tP);
+  const foinAn = cle(an).reduce((s, k) => s + dep[k].foin, 0), copAn = cle(an).reduce((s, k) => s + dep[k].copeaux, 0);
+  const ballesAn = liste(S.foyer.foin?.livraisons).filter(l => l.date?.startsWith(an + "-") && (+l.prixTotal || +l.prixBalle)).reduce((s, l) => s + (+l.balles || 0), 0);
+  return `<div class="carte">${entete("Budget", selecteurAnnee(an))}
+    <div class="chiffres">${chiffre(euro(tS).replace(",00", ""), `dépensés en ${an}`)}${chiffre(euro(tP).replace(",00", ""), `en ${an - 1}`, "doux")}${d !== null ? chiffre(`${d > 0 ? "+" : ""}${d} %`, `vs ${an - 1}`, d > 0 ? "hausse" : "baisse") : ""}</div>
+    <svg viewBox="0 0 340 148" class="graph" role="img" aria-label="Dépenses par mois en euros">${svgBarres(sel, prev, max, "or")}</svg>
+    <div class="legende"><span><i class="b2 or"></i>${an}</span><span><i class="b1"></i>${an - 1}</span><span class="petit">euros par mois</span></div>
+    <p class="petit" style="margin-top:8px">${[foinAn ? `Foin ${euro(foinAn).replace(",00", "")}` : "", copAn ? `Copeaux ${euro(copAn).replace(",00", "")}` : "", ballesAn && foinAn ? `${euro(foinAn / ballesAn)} la balle en moyenne` : ""].filter(Boolean).join(" · ")}</p></div>`;
 }
 
 function foin() {
@@ -340,7 +413,7 @@ function foin() {
     gauche: bulle(a === "livraison" ? "blé" : "sapin", "or"), a, id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`,
     sous: [x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
   })).join("");
-  return graphique() +
+  return graphique() + budget() +
     `<div class="carte">${entete("Comptages du foin", bouton("reglage", "params", "", "Seuil d'alerte") + bouton("plus", "inventaire", "", "Nouveau comptage"))}
       ${cs.length ? cs.map(c => { const p = per[c.id]; return rangee({
         gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
@@ -441,6 +514,7 @@ function noterSortie(q, date = ajd(), texte) {
 
 /* ---------- Actions ---------- */
 const actions = {
+  fiche: id => { S.cheval = id; S.vue = "fiche"; window.scrollTo(0, 0); rendre(); },
   cheval(id) {
     const c = id ? S.foyer.chevaux[id] : { actif: true };
     ouvrir(id ? "Modifier le cheval" : "Nouveau cheval",
@@ -502,11 +576,11 @@ const actions = {
     vite(update(base(`soins/${id}`), { dernier: jr })); vite(set(r, { date: jr, ts: Date.now() }));
     toast(`${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, () => { update(base(`soins/${id}`), { dernier: avant }); remove(r); remove(j); });
   },
-  soin(id) {
+  soin(id, d) {
     const chev = liste(S.foyer.chevaux).filter(c => c.actif !== false || c.id === S.foyer.soins?.[id]?.chevalId).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
     const s = id ? S.foyer.soins[id] : { type: "vaccin", n: TYPES.vaccin.n, unite: TYPES.vaccin.unite };
     ouvrir(id ? "Modifier le soin" : "Nouveau soin",
-      `<label for="ch">Cheval</label><select id="ch">${id ? "" : '<option value="*">Tous les chevaux actifs</option>'}${options(chev, s.chevalId)}</select>
+      `<label for="ch">Cheval</label><select id="ch">${id ? "" : '<option value="*">Tous les chevaux actifs</option>'}${options(chev, s.chevalId || d?.cheval)}</select>
        <label>Type de soin</label>${pills("ty", Object.entries(TYPES).map(([k, t]) => [k, t.nom, ICONE_SOIN[k]]), s.type)}` +
       champ("li", "Précision (ex. Grippe, Tétanos)", s.libelle) +
       `<label>Périodicité : tous les</label><div class="duo"><input id="pn" type="number" min="1" inputmode="numeric" value="${s.n || 1}"><select id="pu"><option value="sem" ${s.unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${s.unite !== "sem" ? "selected" : ""}>mois</option></select></div>` +
@@ -527,6 +601,18 @@ const actions = {
     ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
       () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; if (!id) journaliser(`a compté ${balles(o.balles)} en stock`, "comptage"); return set(id ? base(chemin) : push(base("foin/inventaires")), o); },
       id && (() => remove(base(chemin))), ["d", "b"]);
+  },
+  inventaireCopeaux() {
+    const i = S.foyer.copeaux?.inventaire || { date: ajd() };
+    ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
+      () => (journaliser(`a compté ${balles(parseQte(val("b")))} de copeaux`, "copeaux"), set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) })), null, ["b"]);
+  },
+  params() {
+    const f = S.foyer.foin || {};
+    ouvrir("Réglages du stock", `<p class="petit">L'accueil passe en alerte quand il reste moins de jours de foin que le seuil. La commande conseillée vise à couvrir la période choisie.</p>` +
+      champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"') +
+      champ("cv", "Période à couvrir par une commande (jours)", f.couvertureJours || 90, "number", 'min="7" inputmode="numeric"'),
+      () => update(base("foin"), { seuilJours: +val("s") || 14, couvertureJours: +val("cv") || 90 }));
   },
   inventaireCopeaux() {
     const i = S.foyer.copeaux?.inventaire || { date: ajd() };
