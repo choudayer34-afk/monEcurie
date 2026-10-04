@@ -240,12 +240,15 @@ function rendre() {
 
 /* --- Accueil --- */
 const balleSvg = (f = 1, cl = "", st = "") => `<svg class="bl ${cl}" ${st} viewBox="0 0 28 18" aria-hidden="true"><rect class="bv" x="1" y="1" width="26" height="16" rx="3.500"/>${f >= 0.04 ? `<rect class="bp" x="1" y="1" width="${(26 * Math.min(f, 1)).toFixed(1)}" height="16" rx="3.500"/>` : ""}${[9, 19].filter(x => x < 26 * f).map(x => `<path class="bs" d="M${x} 1v16"/>`).join("")}</svg>`;
+const TAS = 10;
+const tasSvg = () => { let r = ""; [[4, 22], [3, 15.500], [2, 9], [1, 2.500]].forEach(([n, y]) => { const x0 = (43 - (n * 10 + (n - 1))) / 2 + 0.500; for (let i = 0; i < n; i++) r += `<rect class="bp" x="${(x0 + i * 11).toFixed(1)}" y="${y}" width="10" height="6" rx="1.800"/>`; }); return `<svg class="tas" viewBox="0 0 44 30" aria-hidden="true">${r}</svg>`; };
 function pile(stock, g) {
-  const unite = stock <= 60 ? 1 : stock <= 300 ? 5 : 10, total = Math.max(0, stock) / unite, entiers = Math.floor(total + 1e-9), frac = total - entiers;
-  let h = ""; for (let i = 0; i < entiers; i++) h += balleSvg(1);
+  const s = Math.max(0, stock), groupe = s > 20, tas = groupe ? Math.floor(s / TAS + 1e-9) : 0, reste = s - tas * TAS, entiers = Math.floor(reste + 1e-9), frac = reste - entiers;
+  let h = ""; for (let i = 0; i < tas; i++) h += tasSvg();
+  for (let i = 0; i < entiers; i++) h += balleSvg(1);
   if (frac > 0.04) h += balleSvg(frac);
   if (g) for (let i = 0; i < g.n; i++) h += balleSvg(1, "fantome", `style="animation-delay:-${g.ecoule}ms"`);
-  return `<div class="pile" role="img" aria-label="${fmtQte(stock)} balles en stock">${h}</div>${unite > 1 ? `<p class="legende-h">1 icône = ${unite} balles</p>` : ""}`;
+  return `<div class="pile" role="img" aria-label="${fmtQte(stock)} balles en stock">${h}</div>${groupe ? `<p class="legende-h">1 tas = ${TAS} balles</p>` : ""}`;
 }
 function hero(p, seuil, g) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
@@ -358,7 +361,7 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips">${chips}</div>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return `<div class="chips">${chips}${tous.some(x => x.ech) ? `<button class="chip" data-a="agenda" title="Exporter vers l'agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
@@ -678,6 +681,19 @@ const actions = {
   res: (id, d) => { $("#drech").close(); actions[d.t](id); },
   intro: () => intro(),
   installer: async () => { if (S.install) { S.install.prompt(); await S.install.userChoice; S.install = null; rendre(); } },
+  agenda: () => {
+    const pad = n => String(n).padStart(2, "0"), auj = new Date(), st = `${auj.getUTCFullYear()}${pad(auj.getUTCMonth() + 1)}${pad(auj.getUTCDate())}T${pad(auj.getUTCHours())}${pad(auj.getUTCMinutes())}00Z`;
+    const txt = t => String(t).replace(/[\\;,]/g, m => "\\" + m).replace(/\n/g, "\\n");
+    const ev = soinsPrevus().filter(x => x.ech).map(x => {
+      const d = x.ech.replace(/-/g, ""), fin = enChaine(jour(x.ech) + 1).replace(/-/g, "");
+      return ["BEGIN:VEVENT", `UID:${x.id}@ecurie`, `DTSTAMP:${st}`, `DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${fin}`,
+        `SUMMARY:${txt(libelleSoin(x) + " · " + S.foyer.chevaux[x.chevalId].nom)}`, "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Soin à prévoir", "TRIGGER:-P7D", "END:VALARM", "END:VEVENT"].join("\r\n");
+    });
+    if (!ev.length) return toast("Aucune échéance à exporter");
+    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Ecurie//FR", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Écurie", ...ev, "END:VCALENDAR"].join("\r\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([ics], { type: "text/calendar" })); a.download = "ecurie-soins.ics"; document.body.append(a); a.click(); a.remove();
+    toast(`${ev.length} échéances exportées`);
+  },
   copier: () => navigator.clipboard?.writeText(S.foyer.code).then(() => toast("Code copié")),
   sortie: () => {
     try { Object.keys(localStorage).filter(k => k.startsWith("ecurie-fid-") || k.startsWith("ecurie-foyer-")).forEach(k => localStorage.removeItem(k)); } catch { /* rien */ }

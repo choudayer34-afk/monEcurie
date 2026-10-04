@@ -274,3 +274,5 @@ img.avatar{object-fit:cover;background:var(--bg2)}
 .photo-btns{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 .photo-btns label{margin:0;font-size:.9rem;color:var(--prim-t);cursor:pointer}
 a.rangee{color:inherit;text-decoration:none}
+.tas{width:44px;height:30px;flex:none}
+.tas .bp{fill:#eabb4c;stroke:#a8741c;stroke-width:.7}
