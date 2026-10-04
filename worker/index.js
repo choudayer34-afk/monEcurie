@@ -1,21 +1,10 @@
 // Cloudflare Worker : rappel quotidien par e-mail quand le stock de foin passe sous le seuil.
 // Variables à définir : FIREBASE_DB_URL, FIREBASE_SECRET (secret), RESEND_API_KEY (secret), EXPEDITEUR
-const jour = d => Math.floor(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5);
+import { prevision } from "./prevision.js";
 const liste = o => Object.values(o || {});
 
 function joursRestants(f, auj) {
-  const inv = f.foin?.inventaire;
-  const kg = liste(f.chevaux).filter(c => c.actif !== false).reduce((s, c) => s + (+c.foinKgJour || 0), 0);
-  const conso = kg / (+(f.foin?.kgBalle) || 1);
-  if (!inv?.date || !(conso > 0)) return null;
-  const livs = {};
-  liste(f.foin.livraisons).forEach(l => { const j = jour(l.date); livs[j] = (livs[j] || 0) + (+l.balles || 0); });
-  let stock = +inv.balles || 0, j = jour(inv.date);
-  for (let i = 0; i < 1500; i++) {
-    j++; stock += (livs[j] || 0) - conso;
-    if (stock < 0) return Math.max(0, j - auj);
-  }
-  return null;
+  return prevision(f, auj)?.jours ?? null;
 }
 
 async function run(env) {
