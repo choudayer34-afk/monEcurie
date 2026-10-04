@@ -10,8 +10,9 @@ main{padding:12px;max-width:640px;margin:auto}
 .grand{font-size:2rem;font-weight:700}
 .alerte{color:var(--alerte)}.ok{color:var(--ok)}
 nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#fff;border-top:1px solid var(--bord);padding-bottom:env(safe-area-inset-bottom)}
-nav button{flex:1;border:0;background:none;padding:14px 4px;font-size:.85rem}
-nav button.actif{color:var(--vert);font-weight:700;border-top:3px solid var(--vert)}
+nav button{flex:1;border:0;background:none;padding:12px 4px;color:#566;border-top:3px solid transparent}
+nav svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav button.actif{color:var(--vert);border-top-color:var(--vert)}
 button.btn{background:var(--vert);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-size:1rem}
 button.sec{background:#fff;color:var(--vert);border:1px solid var(--vert)}
 button.danger{background:var(--alerte)}

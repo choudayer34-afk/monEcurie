@@ -21,9 +21,24 @@ const aujourdhui = () => { const d = new Date(); return jour(`${d.getFullYear()}
 const fr = d => d ? d.split("-").reverse().join("/") : "";
 const liste = o => Object.entries(o || {}).map(([id, v]) => ({ id, ...v }));
 
+const parseQte = t => {
+  t = String(t ?? "").trim().replace(",", ".");
+  const m = t.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/);
+  if (m) return (+m[1] || 0) + (+m[2]) / (+m[3]);
+  const n = parseFloat(t); return isNaN(n) ? 0 : n;
+};
+const fmtQte = n => {
+  const w = Math.floor(n + 1e-9), f = n - w;
+  for (const [a, b] of [[1, 4], [1, 3], [1, 2], [2, 3], [3, 4]]) if (Math.abs(f - a / b) < 0.012) return (w ? w + " " : "") + a + "/" + b;
+  return String(Math.round(n * 100) / 100);
+};
+const num = t => parseFloat(String(t ?? "").replace(",", ".")) || 0;
+const arr = n => Math.round(n * 100) / 100;
+const euro = n => n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+const infoPrix = l => `${l.prixBalle ? ` · ${euro(l.prixBalle)}/balle` : ""}${l.prixTotal ? ` · total ${euro(l.prixTotal)}` : ""}`;
+const consoCheval = c => c.foinBallesJour !== undefined ? (+c.foinBallesJour || 0) : (+c.foinKgJour || 0) / 15;
 function consoBallesJour(f) {
-  const kg = liste(f.chevaux).filter(c => c.actif !== false).reduce((s, c) => s + (+c.foinKgJour || 0), 0);
-  return kg / (+(f.foin?.kgBalle) || 1);
+  return liste(f.chevaux).filter(c => c.actif !== false).reduce((s, c) => s + consoCheval(c), 0);
 }
 export function prevision(f) {
   const inv = f.foin?.inventaire, conso = consoBallesJour(f);
@@ -77,7 +92,7 @@ function ecranFoyer() {
     const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join("");
     const fid = push(ref(db, "foyers")).key;
     await set(ref(db, `codes/${code}`), fid);
-    await set(ref(db, `foyers/${fid}`), { nom, code, membres: { [S.user.uid]: { code, email: S.user.email } }, foin: { kgBalle: 15, seuilJours: 14 } });
+    await set(ref(db, `foyers/${fid}`), { nom, code, membres: { [S.user.uid]: { code, email: S.user.email } }, foin: { seuilJours: 14 } });
     await set(ref(db, `users/${S.user.uid}/foyerId`), fid);
     location.reload();
   };
@@ -100,6 +115,7 @@ const vues = { accueil, chevaux, foin, contacts, reglages };
 function rendre() {
   if (!S.foyer) return;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === S.vue));
+  $("#titre").textContent = { accueil: "Accueil", chevaux: "Chevaux", foin: "Stock", contacts: "Contacts", reglages: "Foyer" }[S.vue];
   $("#vue").innerHTML = vues[S.vue]();
 }
 
@@ -111,7 +127,7 @@ function accueil() {
   else {
     const bas = p.jours !== null && p.jours <= seuil;
     bloc = `<div class="grand ${bas ? "alerte" : "ok"}">${p.jours === null ? "Plus de 4 ans" : p.jours + " jours"}</div>
-      <div class="petit">Rupture prévue : ${p.rupture ? fr(p.rupture) : "aucune"} · Stock estimé : ${p.stockAuj.toFixed(1)} balles · Consommation : ${p.conso.toFixed(2)} balle/jour</div>
+      <div class="petit">Rupture prévue : ${p.rupture ? fr(p.rupture) : "aucune"} · Stock estimé : ${fmtQte(p.stockAuj)} balles · Consommation : ${fmtQte(p.conso)} balle/jour</div>
       ${bas ? `<p class="alerte">Stock sous le seuil de ${seuil} jours : prévois une commande.</p>` : ""}`;
   }
   return `<div class="carte"><h2>Foin restant</h2>${bloc}</div>
@@ -122,20 +138,25 @@ function chevaux() {
   const l = liste(S.foyer.chevaux).sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
   return `<div class="ligne" style="margin-bottom:10px"><h2>Chevaux</h2><button class="btn" data-a="cheval">+ Ajouter</button></div>` +
     (l.map(c => `<div class="carte ligne" data-a="cheval" data-id="${c.id}"><div><b>${esc(c.nom)}</b> ${c.actif === false ? '<span class="petit">(inactif)</span>' : ""}
-      <div class="petit">${esc(c.robe || "")} ${c.naissance ? "· né le " + fr(c.naissance) : ""} · ${+c.foinKgJour || 0} kg de foin/jour</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucun cheval.</p>`);
+      <div class="petit">${esc(c.robe || "")} ${c.naissance ? "· né le " + fr(c.naissance) : ""} · ${fmtQte(consoCheval(c))} balle/jour${c.sire ? " · SIRE " + esc(c.sire) : ""}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucun cheval.</p>`);
 }
 
 function foin() {
-  const f = S.foyer.foin || {}, inv = f.inventaire;
+  const f = S.foyer.foin || {}, inv = f.inventaire, cop = S.foyer.copeaux || {};
   const livs = liste(f.livraisons).sort((a, b) => b.date.localeCompare(a.date));
+  const livC = liste(cop.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const nomC = id => S.foyer.contacts?.[id]?.nom || "";
-  return `<div class="carte"><h2>Paramètres</h2>
-      <div class="petit">Poids d'une balle : ${f.kgBalle || 15} kg · Alerte à ${f.seuilJours || 14} jours</div>
-      <div class="petit">Dernier inventaire : ${inv ? `${inv.balles} balles le ${fr(inv.date)}` : "aucun"}</div>
-      <div class="actions"><button class="btn sec" data-a="params">Paramètres</button><button class="btn" data-a="inventaire">Inventaire</button></div></div>
-    <div class="ligne" style="margin-bottom:10px"><h2>Livraisons</h2><button class="btn" data-a="livraison">+ Livraison</button></div>` +
-    (livs.map(l => `<div class="carte ligne" data-a="livraison" data-id="${l.id}"><div><b>${l.balles} balles</b> · ${fr(l.date)}
-      <div class="petit">${esc(nomC(l.contactId))} ${esc(l.note || "")}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucune livraison.</p>`);
+  return `<div class="carte"><h2>Foin</h2>
+      <div class="petit">Alerte à ${f.seuilJours || 14} jours · Dernier inventaire : ${inv ? `${fmtQte(inv.balles)} balles le ${fr(inv.date)}` : "aucun"}</div>
+      <div class="actions"><button class="btn sec" data-a="params">Alerte</button><button class="btn" data-a="inventaire">Inventaire</button></div></div>
+    <div class="ligne" style="margin-bottom:10px"><h2>Livraisons de foin</h2><button class="btn" data-a="livraison">+ Livraison</button></div>` +
+    (livs.map(l => `<div class="carte ligne" data-a="livraison" data-id="${l.id}"><div><b>${fmtQte(+l.balles || 0)} balles</b> · ${fr(l.date)}
+      <div class="petit">${l.poidsBalle ? `${l.poidsBalle} kg/balle (≈ ${Math.round(l.balles * l.poidsBalle)} kg)` : ""}${infoPrix(l)} ${esc(nomC(l.contactId))} ${esc(l.note || "")}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucune livraison.</p>`) +
+    `<div class="carte" style="margin-top:18px"><h2>Copeaux de bois</h2>
+      <div class="petit">Dernier comptage : ${cop.inventaire ? `${fmtQte(cop.inventaire.balles)} balles le ${fr(cop.inventaire.date)}` : "aucun"}</div>
+      <div class="actions"><button class="btn sec" data-a="inventaireCopeaux">Comptage</button><button class="btn" data-a="livraisonCopeaux">+ Livraison</button></div></div>` +
+    livC.map(l => `<div class="carte ligne" data-a="livraisonCopeaux" data-id="${l.id}"><div><b>${fmtQte(+l.balles || 0)} balles</b> · ${fr(l.date)}
+      <div class="petit">${infoPrix(l).replace(/^ · /, "")} ${esc(nomC(l.contactId))} ${esc(l.note || "")}</div></div><span>›</span></div>`).join("");
 }
 
 function contacts() {
@@ -144,6 +165,7 @@ function contacts() {
     (l.map(c => `<div class="carte"><div class="ligne"><div><b>${esc(c.nom)}</b> <span class="petit">${esc(c.role || "")}</span></div>
       <button class="btn sec" data-a="contact" data-id="${c.id}">Modifier</button></div>
       <div class="petit">${c.tel ? `<a href="tel:${esc(c.tel)}">${esc(c.tel)}</a>` : ""} ${c.email ? `· <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ""}</div>
+      ${c.adresse ? `<div class="petit"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.adresse)}" target="_blank" rel="noopener">${esc(c.adresse)}</a></div>` : ""}
       ${c.notes ? `<div class="petit">${esc(c.notes)}</div>` : ""}</div>`).join("") || `<p class="vide">Aucun contact (fournisseur de foin, vétérinaire, maréchal…).</p>`);
 }
 
@@ -169,15 +191,27 @@ function ouvrir(titre, corps, onOk, onSup) {
 const base = p => ref(db, `foyers/${S.fid}/${p}`);
 const ajd = () => enChaine(aujourdhui());
 
+const prixChamps = l => champ("pb", "Prix par balle (€)", l.prixBalle || "", "text", 'inputmode="decimal"') +
+  champ("pt", "Prix total (€)", l.prixTotal || "", "text", 'inputmode="decimal"') +
+  `<p class="petit">Renseigne l'un des deux : l'autre se calcule.</p>`;
+function lierPrix(dernier) {
+  const b = $("#b"), pb = $("#pb"), pt = $("#pt"), q = () => parseQte(b.value);
+  pb.oninput = () => { dernier = "pb"; pt.value = pb.value.trim() && q() ? arr(num(pb.value) * q()) : ""; };
+  pt.oninput = () => { dernier = "pt"; pb.value = pt.value.trim() && q() ? arr(num(pt.value) / q()) : ""; };
+  b.oninput = () => {
+    if (dernier === "pt" && pt.value.trim()) pb.value = q() ? arr(num(pt.value) / q()) : "";
+    else if (pb.value.trim()) pt.value = q() ? arr(num(pb.value) * q()) : "";
+  };
+}
 const actions = {
   cheval(id) {
-    const c = id ? S.foyer.chevaux[id] : { actif: true, foinKgJour: 8 };
+    const c = id ? S.foyer.chevaux[id] : { actif: true };
     ouvrir(id ? "Modifier le cheval" : "Nouveau cheval",
-      champ("n", "Nom", c.nom) + champ("r", "Robe", c.robe) + champ("na", "Date de naissance", c.naissance, "date") +
-      champ("k", "Foin par jour (kg)", c.foinKgJour, "number", 'step="0.5" min="0"') +
+      champ("n", "Nom", c.nom) + champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters"') + champ("r", "Robe", c.robe) + champ("na", "Date de naissance", c.naissance, "date") +
+      champ("k", "Foin par jour, en balles (ex. 1/3 ou 0,5)", id ? fmtQte(consoCheval(c)) : "", "text", 'inputmode="decimal"') +
       `<label>Statut</label><select id="ac"><option value="1" ${c.actif !== false ? "selected" : ""}>Actif</option><option value="0" ${c.actif === false ? "selected" : ""}>Inactif</option></select>` +
       `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), robe: val("r"), naissance: val("na"), foinKgJour: +val("k") || 0, actif: val("ac") === "1", notes: val("no") }),
+      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), foinBallesJour: parseQte(val("k")), actif: val("ac") === "1", notes: val("no") }),
       id && (() => remove(base(`chevaux/${id}`))));
   },
   contact(id) {
@@ -185,28 +219,45 @@ const actions = {
     ouvrir(id ? "Modifier le contact" : "Nouveau contact",
       champ("n", "Nom", c.nom) +
       `<label>Rôle</label><select id="ro">${["Fournisseur de foin", "Vétérinaire", "Maréchal-ferrant", "Autre"].map(r => `<option ${c.role === r ? "selected" : ""}>${r}</option>`).join("")}</select>` +
-      champ("t", "Téléphone", c.tel, "tel") + champ("e", "E-mail", c.email, "email") + `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`contacts/${id}`) : push(base("contacts")), { nom: val("n"), role: val("ro"), tel: val("t"), email: val("e"), notes: val("no") }),
+      champ("t", "Téléphone", c.tel, "tel") + champ("e", "E-mail", c.email, "email") + champ("ad", "Adresse", c.adresse, "text", 'autocomplete="street-address"') + `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
+      () => set(id ? base(`contacts/${id}`) : push(base("contacts")), { nom: val("n"), role: val("ro"), tel: val("t"), email: val("e"), adresse: val("ad"), notes: val("no") }),
       id && (() => remove(base(`contacts/${id}`))));
   },
   livraison(id) {
     const l = id ? S.foyer.foin.livraisons[id] : { date: ajd() };
     const four = liste(S.foyer.contacts).map(c => `<option value="${c.id}" ${l.contactId === c.id ? "selected" : ""}>${esc(c.nom)}</option>`).join("");
     ouvrir(id ? "Modifier la livraison" : "Nouvelle livraison",
-      champ("d", "Date", l.date, "date") + champ("b", "Nombre de balles", l.balles, "number", 'min="0" step="1"') +
+      champ("d", "Date", l.date, "date") + champ("b", "Nombre de balles (ex. 40 ou 12 1/2)", l.balles === undefined ? "" : fmtQte(l.balles), "text", 'inputmode="decimal"') +
+      champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle, "number", 'min="0" step="0.5"') + prixChamps(l) +
       `<label>Fournisseur</label><select id="c"><option value="">—</option>${four}</select>` + champ("no", "Note", l.note),
-      () => set(id ? base(`foin/livraisons/${id}`) : push(base("foin/livraisons")), { date: val("d"), balles: +val("b") || 0, contactId: val("c"), note: val("no") }),
+      () => set(id ? base(`foin/livraisons/${id}`) : push(base("foin/livraisons")), { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
       id && (() => remove(base(`foin/livraisons/${id}`))));
+    lierPrix(l.prixTotal ? "pt" : "pb");
   },
   inventaire() {
     const i = S.foyer.foin?.inventaire || { date: ajd() };
-    ouvrir("Inventaire du stock", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées", i.balles, "number", 'min="0" step="1"'),
-      () => set(base("foin/inventaire"), { date: val("d"), balles: +val("b") || 0 }));
+    ouvrir("Inventaire du stock", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées (ex. 25 ou 12 1/3)", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
+      () => set(base("foin/inventaire"), { date: val("d"), balles: parseQte(val("b")) }));
   },
   params() {
     const f = S.foyer.foin || {};
-    ouvrir("Paramètres du foin", champ("k", "Poids d'une balle (kg)", f.kgBalle || 15, "number", 'min="1"') + champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1"'),
-      () => update(base("foin"), { kgBalle: +val("k") || 15, seuilJours: +val("s") || 14 }));
+    ouvrir("Alerte de stock", champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1"'),
+      () => update(base("foin"), { seuilJours: +val("s") || 14 }));
+  },
+  inventaireCopeaux() {
+    const i = S.foyer.copeaux?.inventaire || { date: ajd() };
+    ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
+      () => set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) }));
+  },
+  livraisonCopeaux(id) {
+    const l = id ? S.foyer.copeaux.livraisons[id] : { date: ajd() };
+    const four = liste(S.foyer.contacts).map(c => `<option value="${c.id}" ${l.contactId === c.id ? "selected" : ""}>${esc(c.nom)}</option>`).join("");
+    ouvrir(id ? "Modifier la livraison" : "Livraison de copeaux",
+      champ("d", "Date", l.date, "date") + champ("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles), "text", 'inputmode="decimal"') + prixChamps(l) +
+      `<label>Fournisseur</label><select id="c"><option value="">—</option>${four}</select>` + champ("no", "Note", l.note),
+      () => set(id ? base(`copeaux/livraisons/${id}`) : push(base("copeaux/livraisons")), { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
+      id && (() => remove(base(`copeaux/livraisons/${id}`))));
+    lierPrix(l.prixTotal ? "pt" : "pb");
   },
   sortie: () => signOut(auth).then(() => location.reload())
 };
