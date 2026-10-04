@@ -23,6 +23,24 @@ export function periodes(f) {
   return out;
 }
 
+// Une sortie compte si elle est datée après le comptage, ou le même jour mais saisie après lui
+export const sortieApres = (s, c) => { const j = jour(s.date), lj = jour(c.date); return j > lj || (j === lj && (+s.ts || 0) > (+c.ts || 0)); };
+
+// Consommation par mois (clé AAAA-MM) : réelle entre comptages, puis sorties notées depuis le dernier comptage
+export function consoMensuelle(f) {
+  const m = {};
+  for (const p of periodes(f)) {
+    if (p.conso < 0) continue;
+    for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const k = enChaine(j).slice(0, 7); m[k] = (m[k] || 0) + p.rate; }
+  }
+  const cs = comptages(f);
+  if (cs.length) {
+    const last = cs[cs.length - 1];
+    liste(f.foin?.sorties).filter(s => sortieApres(s, last)).forEach(s => { const k = s.date.slice(0, 7); m[k] = (m[k] || 0) + (+s.balles || 0); });
+  }
+  return m;
+}
+
 // Prévision : consommation par jour observée sur le même mois lors des comptages passés
 export function prevision(f, auj) {
   const cs = comptages(f); if (!cs.length) return null;
@@ -31,7 +49,7 @@ export function prevision(f, auj) {
   liste(f.foin?.livraisons).forEach(l => { const j = jour(l.date); livs[j] = (livs[j] || 0) + (+l.balles || 0); });
   // Sorties notées depuis le dernier comptage : si elles existent, elles remplacent la consommation estimée jusqu'à aujourd'hui
   const sort = {}; let nbSort = 0, totSort = 0;
-  liste(f.foin?.sorties).forEach(s => { const j = jour(s.date); if (j > lj) { sort[j] = (sort[j] || 0) + (+s.balles || 0); nbSort++; if (j <= auj) totSort += +s.balles || 0; } });
+  liste(f.foin?.sorties).filter(s => sortieApres(s, last)).forEach(s => { const j = jour(s.date); { sort[j] = (sort[j] || 0) + (+s.balles || 0); nbSort++; if (j <= auj) totSort += +s.balles || 0; } });
   const reel = nbSort > 0;
   const sum = Array(12).fill(0), n = Array(12).fill(0); let tot = 0, totN = 0;
   for (const p of periodes(f)) {
@@ -40,7 +58,7 @@ export function prevision(f, auj) {
     for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += r; n[m]++; tot += r; totN++; }
   }
   const historique = totN > 0, moy = historique ? tot / totN : 0, taux = m => (n[m] ? sum[m] / n[m] : moy);
-  let stock = +last.balles || 0, stockAuj = lj >= auj ? stock : null, rupture = null;
+  let stock = (+last.balles || 0) - (lj <= auj ? (sort[lj] || 0) : 0), stockAuj = lj >= auj ? stock : null, rupture = null;
   for (let i = 0; i < 1500; i++) {
     const j = lj + 1 + i;
     const conso = reel && j <= auj ? (sort[j] || 0) : (historique ? taux(new Date(j * 864e5).getUTCMonth()) : 0);
@@ -50,7 +68,7 @@ export function prevision(f, auj) {
   }
   if (stockAuj === null) stockAuj = stock;
   return {
-    stockAuj, historique, last, sorties: totSort,
+    stockAuj, historique, last, sorties: totSort, reel,
     rupture: historique && rupture ? enChaine(rupture) : null,
     jours: historique && rupture ? Math.max(0, rupture - auj) : null
   };
