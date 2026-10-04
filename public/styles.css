@@ -184,7 +184,8 @@ dialog::backdrop{background:#0008;backdrop-filter:blur(2px)}
 .poignee{width:42px;height:5px;border-radius:9px;background:var(--sable);margin:10px auto 0}
 dialog .entete{padding:8px 16px 0 20px;margin:0}
 dialog .entete h2{font-size:1.2rem}
-.formulaire{padding:0 20px 8px;overflow-y:auto;flex:1}
+.formulaire{padding:0 20px 8px;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:0 1 auto;min-height:0;max-height:calc(92vh - 150px);max-height:calc(92dvh - 150px)}
+dialog>.poignee,dialog>.entete,dialog>.barre{flex:none}
 .barre{display:flex;gap:10px;padding:12px 20px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--bord);background:var(--carte)}
 .barre .btn{flex:1}.barre .danger-t{flex:0 0 auto}
 @media (min-width:640px){dialog{margin:auto;border-radius:26px}.fab{right:calc(50% - 322px)}}
