@@ -4,6 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, remove, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
+import { jour, enChaine, liste, comptages, periodes, prevision } from "./prevision.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -15,11 +16,8 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const S = { user: null, fid: null, foyer: null, vue: "accueil" };
 
 /* ---------- Dates et prévision ---------- */
-const jour = d => Math.floor(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5);
-const enChaine = n => new Date(n * 864e5).toISOString().slice(0, 10);
 const aujourdhui = () => { const d = new Date(); return jour(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`); };
 const fr = d => d ? d.split("-").reverse().join("/") : "";
-const liste = o => Object.entries(o || {}).map(([id, v]) => ({ id, ...v }));
 
 const parseQte = t => {
   t = String(t ?? "").trim().replace(",", ".");
@@ -36,27 +34,6 @@ const num = t => parseFloat(String(t ?? "").replace(",", ".")) || 0;
 const arr = n => Math.round(n * 100) / 100;
 const euro = n => n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
 const infoPrix = l => `${l.prixBalle ? ` · ${euro(l.prixBalle)}/balle` : ""}${l.prixTotal ? ` · total ${euro(l.prixTotal)}` : ""}`;
-const consoCheval = c => c.foinBallesJour !== undefined ? (+c.foinBallesJour || 0) : (+c.foinKgJour || 0) / 15;
-function consoBallesJour(f) {
-  return liste(f.chevaux).filter(c => c.actif !== false).reduce((s, c) => s + consoCheval(c), 0);
-}
-export function prevision(f) {
-  const inv = f.foin?.inventaire, conso = consoBallesJour(f);
-  if (!inv?.date || !(conso > 0)) return null;
-  const livs = {};
-  liste(f.foin.livraisons).forEach(l => { const j = jour(l.date); livs[j] = (livs[j] || 0) + (+l.balles || 0); });
-  const auj = aujourdhui();
-  let stock = +inv.balles || 0, j = jour(inv.date), stockAuj = j >= auj ? stock : null, rupture = null;
-  for (let i = 0; i < 1500; i++) {
-    j++;
-    stock += (livs[j] || 0) - conso;
-    if (stock < 0) { rupture = j; stock = 0; if (stockAuj === null) stockAuj = 0; break; }
-    if (j === auj) stockAuj = stock;
-  }
-  if (stockAuj === null) stockAuj = stock;
-  return { conso, stockAuj, rupture: rupture && enChaine(rupture), jours: rupture ? Math.max(0, rupture - auj) : null };
-}
-
 /* ---------- Authentification et foyer ---------- */
 onAuthStateChanged(auth, async u => {
   S.user = u;
@@ -120,17 +97,20 @@ function rendre() {
 }
 
 function accueil() {
-  const p = prevision(S.foyer), seuil = +(S.foyer.foin?.seuilJours) || 14;
+  const p = prevision(S.foyer, aujourdhui()), seuil = +(S.foyer.foin?.seuilJours) || 14;
   const nb = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
   let bloc;
-  if (!p) bloc = `<p class="vide">Renseigne un inventaire de foin et la ration de tes chevaux pour obtenir la prévision.</p>`;
+  if (!p) bloc = `<p class="vide">Fais un premier comptage du foin dans l'onglet Stock.</p>`;
+  else if (!p.historique) bloc = `<div class="grand">${fmtQte(p.stockAuj)} balles</div>
+      <div class="petit">Stock au comptage du ${fr(p.last.date)}, livraisons comprises. La prévision apparaîtra après un second comptage.</div>`;
   else {
     const bas = p.jours !== null && p.jours <= seuil;
     bloc = `<div class="grand ${bas ? "alerte" : "ok"}">${p.jours === null ? "Plus de 4 ans" : p.jours + " jours"}</div>
-      <div class="petit">Rupture prévue : ${p.rupture ? fr(p.rupture) : "aucune"} · Stock estimé : ${fmtQte(p.stockAuj)} balles · Consommation : ${fmtQte(p.conso)} balle/jour</div>
+      <div class="petit">Rupture prévue : ${p.rupture ? fr(p.rupture) : "aucune"} · Stock estimé : ${fmtQte(p.stockAuj)} balles</div>
+      <div class="petit">Prévision d'après la consommation observée lors des comptages, mois par mois.</div>
       ${bas ? `<p class="alerte">Stock sous le seuil de ${seuil} jours : prévois une commande.</p>` : ""}`;
   }
-  return `<div class="carte"><h2>Foin restant</h2>${bloc}</div>
+  return `<div class="carte"><h2>Foin</h2>${bloc}</div>
     <div class="carte ligne"><span>Chevaux actifs</span><b>${nb}</b></div>`;
 }
 
@@ -138,18 +118,19 @@ function chevaux() {
   const l = liste(S.foyer.chevaux).sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
   return `<div class="ligne" style="margin-bottom:10px"><h2>Chevaux</h2><button class="btn" data-a="cheval">+ Ajouter</button></div>` +
     (l.map(c => `<div class="carte ligne" data-a="cheval" data-id="${c.id}"><div><b>${esc(c.nom)}</b> ${c.actif === false ? '<span class="petit">(inactif)</span>' : ""}
-      <div class="petit">${esc(c.robe || "")} ${c.naissance ? "· né le " + fr(c.naissance) : ""} · ${fmtQte(consoCheval(c))} balle/jour${c.sire ? " · SIRE " + esc(c.sire) : ""}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucun cheval.</p>`);
+      <div class="petit">${esc(c.robe || "")} ${c.naissance ? "· né le " + fr(c.naissance) : ""} ${c.sire ? " · SIRE " + esc(c.sire) : ""}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucun cheval.</p>`);
 }
 
 function foin() {
-  const f = S.foyer.foin || {}, inv = f.inventaire, cop = S.foyer.copeaux || {};
+  const f = S.foyer.foin || {}, cop = S.foyer.copeaux || {};
+  const cs = comptages(S.foyer).reverse(), per = Object.fromEntries(periodes(S.foyer).map(p => [p.idFin, p]));
   const livs = liste(f.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const livC = liste(cop.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const nomC = id => S.foyer.contacts?.[id]?.nom || "";
-  return `<div class="carte"><h2>Foin</h2>
-      <div class="petit">Alerte à ${f.seuilJours || 14} jours · Dernier inventaire : ${inv ? `${fmtQte(inv.balles)} balles le ${fr(inv.date)}` : "aucun"}</div>
-      <div class="actions"><button class="btn sec" data-a="params">Alerte</button><button class="btn" data-a="inventaire">Inventaire</button></div></div>
-    <div class="ligne" style="margin-bottom:10px"><h2>Livraisons de foin</h2><button class="btn" data-a="livraison">+ Livraison</button></div>` +
+  return `<div class="ligne" style="margin-bottom:10px"><h2>Comptages du foin</h2><div><button class="btn sec" data-a="params">Alerte</button> <button class="btn" data-a="inventaire">+ Comptage</button></div></div>` +
+    (cs.map(c => { const p = per[c.id]; return `<div class="carte ligne" data-a="inventaire" data-id="${c.id}"><div><b>${fmtQte(+c.balles || 0)} balles</b> · ${fr(c.date)}
+      <div class="petit">${p ? p.conso < 0 ? `<span class="alerte">Incohérent depuis le ${fr(p.du)} : livraison oubliée ?</span>` : `Depuis le ${fr(p.du)} : ${fmtQte(Math.round(p.conso * 100) / 100)} balles consommées (${fmtQte(Math.round(p.rate * 100) / 100)}/jour sur ${p.jours} jours)` : "Premier comptage"}</div></div><span>›</span></div>`; }).join("") || `<p class="vide">Aucun comptage. Tu peux saisir des comptages des années passées pour la prévision.</p>`) +
+    `<div class="ligne" style="margin:18px 0 10px"><h2>Livraisons de foin</h2><button class="btn" data-a="livraison">+ Livraison</button></div>` +
     (livs.map(l => `<div class="carte ligne" data-a="livraison" data-id="${l.id}"><div><b>${fmtQte(+l.balles || 0)} balles</b> · ${fr(l.date)}
       <div class="petit">${l.poidsBalle ? `${l.poidsBalle} kg/balle (≈ ${Math.round(l.balles * l.poidsBalle)} kg)` : ""}${infoPrix(l)} ${esc(nomC(l.contactId))} ${esc(l.note || "")}</div></div><span>›</span></div>`).join("") || `<p class="vide">Aucune livraison.</p>`) +
     `<div class="carte" style="margin-top:18px"><h2>Copeaux de bois</h2>
@@ -208,10 +189,9 @@ const actions = {
     const c = id ? S.foyer.chevaux[id] : { actif: true };
     ouvrir(id ? "Modifier le cheval" : "Nouveau cheval",
       champ("n", "Nom", c.nom) + champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters"') + champ("r", "Robe", c.robe) + champ("na", "Date de naissance", c.naissance, "date") +
-      champ("k", "Foin par jour, en balles (ex. 1/3 ou 0,5)", id ? fmtQte(consoCheval(c)) : "", "text", 'inputmode="decimal"') +
-      `<label>Statut</label><select id="ac"><option value="1" ${c.actif !== false ? "selected" : ""}>Actif</option><option value="0" ${c.actif === false ? "selected" : ""}>Inactif</option></select>` +
+            `<label>Statut</label><select id="ac"><option value="1" ${c.actif !== false ? "selected" : ""}>Actif</option><option value="0" ${c.actif === false ? "selected" : ""}>Inactif</option></select>` +
       `<label>Notes</label><textarea id="no">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), foinBallesJour: parseQte(val("k")), actif: val("ac") === "1", notes: val("no") }),
+      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: val("ac") === "1", notes: val("no") }),
       id && (() => remove(base(`chevaux/${id}`))));
   },
   contact(id) {
@@ -234,10 +214,12 @@ const actions = {
       id && (() => remove(base(`foin/livraisons/${id}`))));
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
-  inventaire() {
-    const i = S.foyer.foin?.inventaire || { date: ajd() };
-    ouvrir("Inventaire du stock", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées (ex. 25 ou 12 1/3)", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
-      () => set(base("foin/inventaire"), { date: val("d"), balles: parseQte(val("b")) }));
+  inventaire(id) {
+    const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
+    const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
+    ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + champ("b", "Balles comptées (ex. 25 ou 12 1/3)", i.balles === undefined ? "" : fmtQte(i.balles), "text", 'inputmode="decimal"'),
+      () => set(id ? base(chemin) : push(base("foin/inventaires")), { date: val("d"), balles: parseQte(val("b")) }),
+      id && (() => remove(base(chemin))));
   },
   params() {
     const f = S.foyer.foin || {};
