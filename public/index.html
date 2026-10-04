@@ -13,8 +13,10 @@
 <body>
 <header>
   <div><h1 id="titre">Écurie</h1><p id="sous"></p></div>
-  <span id="foyerNom"></span>
+  <div class="h-droite"><span id="foyerNom"></span>
+    <button id="rech" class="ib-h" hidden aria-label="Rechercher" title="Rechercher"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button></div>
 </header>
+<div id="hors" hidden>Hors réseau : tes modifications seront envoyées au retour du réseau.</div>
 <main id="vue"></main>
 <nav id="nav" hidden>
   <button data-v="accueil" title="Accueil" aria-label="Accueil"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg></button>
@@ -25,6 +27,8 @@
   <button data-v="reglages" title="Foyer" aria-label="Foyer"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5c3 0 5 1.5 5 4.5"/></svg></button>
 </nav>
 <dialog id="dlg"></dialog>
+<dialog id="drech"></dialog>
+<dialog id="intro"></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
 </body>

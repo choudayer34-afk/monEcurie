@@ -14,7 +14,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear(), filtre: "tous" };
+const S = { user: null, fid: null, foyer: null, vue: "accueil", annee: new Date().getFullYear(), filtre: "tous", install: null };
 
 /* ---------- Icônes ---------- */
 const I = {
@@ -37,6 +37,7 @@ const I = {
   pilule: '<path d="M10.5 20.5a5 5 0 0 1-7-7l10-10a5 5 0 0 1 7 7z"/><path d="M8.5 8.5l7 7"/>',
   dent: '<path d="M9 3c-2.5 0-4 2-4 4.5 0 2 1 3.5 1.5 5.5.5 2.5.5 8 2.5 8 1.8 0 1.5-5 3-5s1.2 5 3 5c2 0 2-5.5 2.5-8 .5-2 1.5-3.5 1.5-5.5C19 5 17.5 3 15 3c-1.5 0-2 1-3 1S10.5 3 9 3z"/>',
   sapin: '<path d="M12 3l6 8h-3.5l4.5 7H5l4.5-7H6z"/><path d="M12 18v3"/>',
+  crayon: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
   retour: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
   copie: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   calendrier: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
@@ -75,16 +76,49 @@ const age = n => {
 };
 const quand = j => (j < 0 ? `en retard de ${-j} j` : j === 0 ? "aujourd'hui" : j === 1 ? "demain" : `dans ${j} j`);
 const base = p => ref(db, `foyers/${S.fid}/${p}`);
+const nomCheval = id => S.foyer?.chevaux?.[id]?.nom || "Cheval supprimé";
+const lire = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const ecrireLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } };
+const vite = p => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, 1200))]); // ne bloque pas l'écran hors réseau
+const vibre = () => navigator.vibrate?.(12);
+const qui = () => S.foyer?.membres?.[S.user.uid]?.nom || (S.user.email.split("@")[0].replace(/^./, c => c.toUpperCase()));
+function journaliser(texte, type) {
+  const r = push(base("journal"));
+  vite(set(r, { ts: Date.now(), uid: S.user.uid, qui: qui(), texte, type }));
+  return r;
+}
+const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 /* ---------- Authentification et foyer ---------- */
+let initFait = false, minuteurHors;
+function demarrer() {
+  $("#nav").hidden = false; $("#rech").hidden = false; $("#foyerNom").textContent = S.foyer.nom || "";
+  rendre();
+  if (initFait) return; initFait = true;
+  const q = new URLSearchParams(location.search);
+  if (q.get("vue") && vues[q.get("vue")]) { S.vue = q.get("vue"); rendre(); }
+  if (q.get("action") && actions[q.get("action")]) setTimeout(() => actions[q.get("action")](), 350);
+  if (location.search) history.replaceState(null, "", location.pathname);
+  if (!lire("ecurie-intro")) setTimeout(intro, 800);
+}
 onAuthStateChanged(auth, async u => {
   S.user = u;
   if (!u) return ecranConnexion();
-  const r = await get(ref(db, `users/${u.uid}/foyerId`));
-  if (!r.exists()) return ecranFoyer();
-  S.fid = r.val();
-  onValue(ref(db, `foyers/${S.fid}`), snap => { S.foyer = snap.val() || {}; $("#nav").hidden = false; $("#foyerNom").textContent = S.foyer.nom || ""; rendre(); },
-    () => { $("#vue").innerHTML = `<div class="carte alerte">Accès au foyer refusé.</div>`; });
+  let fid = lire(`ecurie-fid-${u.uid}`);
+  if (!fid) {
+    const r = await get(ref(db, `users/${u.uid}/foyerId`));
+    if (!r.exists()) return ecranFoyer();
+    fid = r.val(); ecrireLocal(`ecurie-fid-${u.uid}`, fid);
+  }
+  S.fid = fid;
+  const cache = lire(`ecurie-foyer-${fid}`);
+  if (cache) { try { S.foyer = JSON.parse(cache); demarrer(); } catch { /* cache illisible */ } }
+  onValue(ref(db, `foyers/${fid}`), snap => { S.foyer = snap.val() || {}; ecrireLocal(`ecurie-foyer-${fid}`, JSON.stringify(S.foyer)); demarrer(); },
+    () => { try { localStorage.removeItem(`ecurie-fid-${u.uid}`); } catch { /* rien */ } $("#vue").innerHTML = `<div class="carte alerte">Accès au foyer refusé.</div>`; });
+  onValue(ref(db, ".info/connected"), s => {
+    clearTimeout(minuteurHors);
+    if (s.val() === false) minuteurHors = setTimeout(() => { $("#hors").hidden = false; }, 3500); else $("#hors").hidden = true;
+  });
 });
 
 const accroche = (titre, sous) => `<div class="accueil-log"><div class="logo">${ic("fer")}</div><h2>${titre}</h2><p>${sous}</p></div>`;
@@ -143,8 +177,8 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const vues = { accueil, chevaux, soins, foin, contacts, reglages };
-const TITRES = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer" };
+const vues = { accueil, chevaux, soins, foin, contacts, reglages, journal };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité" };
 
 function rendre() {
   if (!S.foyer) return;
@@ -157,7 +191,8 @@ function rendre() {
     soins: "Vaccins, ferrure, dentiste…",
     foin: "Foin et copeaux",
     contacts: "Fournisseurs et soignants",
-    reglages: "Partage et compte"
+    reglages: "Partage et compte",
+    journal: "Ce que fait la famille"
   }[S.vue];
   const y = window.scrollY;
   $("#vue").innerHTML = vues[S.vue]();
@@ -204,7 +239,33 @@ function accueil() {
   return hero(p, seuil) + statistiques(nbC, plan) + (p ? rapide(p) : "") +
     (plan.length ? `<div class="carte">${entete("Soins à prévoir", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
       ${urgents.length ? urgents.slice(0, 5).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
-      ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "");
+      ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + activiteRecente();
+}
+
+/* --- Activité de la famille --- */
+const ICONE_JOURNAL = { sortie: "blé", soin: "croix", livraison: "blé", comptage: "check", cheval: "fer", copeaux: "sapin" };
+const heure = ts => new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const journalListe = () => liste(S.foyer.journal).filter(j => j.ts).sort((x, y) => y.ts - x.ts);
+const ligneJournal = j => rangee({ gauche: avatar(j.qui), titre: `<b>${esc(j.qui)}</b> ${esc(j.texte)}`, sous: `${heure(j.ts)} · <span class="doux-i">${ic(ICONE_JOURNAL[j.type] || "check")}</span>` });
+function jourLibelle(ts) {
+  const d = new Date(ts), n = new Date(), hier = new Date(Date.now() - 864e5), meme = (x, y) => x.toDateString() === y.toDateString();
+  return meme(d, n) ? "Aujourd'hui" : meme(d, hier) ? "Hier" : d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+}
+function activiteRecente() {
+  const l = journalListe().slice(0, 4); if (!l.length) return "";
+  return `<div class="carte">${entete("Activité récente", bouton("droite", "vue", 'data-v="journal"', "Toute l'activité"))}${l.map(ligneJournal).join("")}</div>`;
+}
+function journal() {
+  const l = journalListe().slice(0, 150);
+  let html = `<div class="chips"><button class="chip" data-a="vue" data-v="accueil">${ic("gauche")} Accueil</button></div>`;
+  if (!l.length) return html + vide("check", "Rien pour l'instant. Les retraits de balles, soins et livraisons notés par la famille apparaîtront ici.");
+  let dernier = "", ouvert = false;
+  for (const j of l) {
+    const lib = jourLibelle(j.ts);
+    if (lib !== dernier) { if (ouvert) html += `</div>`; html += `<h3 class="groupe">${lib}</h3><div class="carte liste">`; dernier = lib; ouvert = true; }
+    html += ligneJournal(j);
+  }
+  return html + `</div>`;
 }
 
 /* --- Soins --- */
@@ -216,12 +277,12 @@ function soinsPrevus() {
 }
 const urgence = j => (j === null ? "neutre" : j < 0 ? "retard" : j <= 30 ? "bientot" : "ok");
 function ligneSoin(s) {
-  return rangee({
+  return `<div class="glisse"><div class="fond">${ic("check")} Fait</div>` + rangee({
     gauche: bulle(ICONE_SOIN[s.type] || "croix", urgence(s.j)), classe: `u-${urgence(s.j)}`, a: "soin", id: s.id,
     titre: `${esc(libelleSoin(s))} · ${esc(S.foyer.chevaux[s.chevalId].nom)}`,
     sous: s.j === null ? "À planifier" : `<span class="q ${urgence(s.j)}">${quand(s.j)}</span> · ${frCourt(s.ech)}${s.dernier ? ` · fait le ${frCourt(s.dernier)}` : ""}`,
     droite: `<button class="fait" data-a="soinFait" data-id="${s.id}" aria-label="Marquer comme fait" title="Fait aujourd'hui">${ic("check")}</button>`
-  });
+  }) + `</div>`;
 }
 function soins() {
   const tous = soinsPrevus(), l = S.filtre === "tous" ? tous : tous.filter(s => s.type === S.filtre);
@@ -229,7 +290,7 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips">${chips}</div>` + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return `<div class="chips">${chips}</div>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
@@ -304,11 +365,14 @@ function contacts() {
 
 /* --- Foyer --- */
 function reglages() {
-  const m = liste(S.foyer.membres);
+  const m = liste(S.foyer.membres), ios = /iphone|ipad/i.test(navigator.userAgent) && !navigator.standalone;
   return `<div class="carte centre"><div class="petit">Code d'invitation de « ${esc(S.foyer.nom)} »</div>
       <div class="code-grand">${esc(S.foyer.code)}</div>
       <button class="btn sec" data-a="copier">${ic("copie")} Copier le code</button></div>
-    <div class="carte">${entete("Membres")}${m.map(x => rangee({ gauche: avatar(x.email), titre: esc(x.email) })).join("")}</div>
+    <div class="carte">${entete("Membres", bouton("crayon", "prenom", "", "Modifier mon prénom"))}${m.map(x => rangee({ gauche: avatar(x.nom || x.email), titre: esc(x.nom || x.email), sous: x.nom ? esc(x.email) : "" })).join("")}</div>
+    ${S.install ? `<button class="btn plein" data-a="installer">${ic("plus")} Installer l'application</button>` : ""}
+    ${ios ? `<div class="carte petit">Sur iPhone : touche le bouton Partager, puis « Sur l'écran d'accueil » pour installer l'application.</div>` : ""}
+    <button class="btn sec plein" data-a="intro">Revoir la présentation</button>
     <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>`;
 }
 
@@ -332,7 +396,7 @@ function ouvrir(titre, corps, onOk, onSup, requis = []) {
   $("#ok").onclick = async () => {
     for (const r of requis) if (!val(r)) { const e = $("#" + r); e.classList.add("invalide"); e.focus(); return; }
     $("#ok").disabled = true;
-    try { await onOk(); d.close(); } catch (e) { $("#ok").disabled = false; toast("Enregistrement impossible"); }
+    try { await vite(onOk()); d.close(); } catch (e) { $("#ok").disabled = false; toast("Enregistrement impossible"); }
   };
   if (onSup) $("#sup").onclick = async () => {
     const b = $("#sup");
@@ -367,11 +431,12 @@ function lierPrix(dernier) {
 }
 const options = (liste_, sel, lib = x => esc(x.nom)) => liste_.map(c => `<option value="${c.id}" ${sel === c.id ? "selected" : ""}>${lib(c)}</option>`).join("");
 
-async function noterSortie(q, date = ajd()) {
+function noterSortie(q, date = ajd(), texte) {
   if (!(q > 0)) return;
-  const r = push(base("foin/sorties"));
-  await set(r, { date, balles: q, ts: Date.now() });
-  toast(`− ${balles(q)} noté`, () => remove(r));
+  vibre();
+  const r = push(base("foin/sorties")), j = journaliser(texte || `a retiré ${balles(q)}`, "sortie");
+  vite(set(r, { date, balles: q, ts: Date.now() }));
+  toast(`− ${balles(q)} noté`, () => { remove(r); remove(j); });
 }
 
 /* ---------- Actions ---------- */
@@ -384,7 +449,7 @@ const actions = {
       champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters" autocomplete="off"') +
       `<label class="interrupteur"><input type="checkbox" id="ac" ${c.actif !== false ? "checked" : ""}><span class="rail"></span>Cheval actif</label>` +
       `<label for="no">Notes</label><textarea id="no" rows="3">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no") }),
+      () => (!id && journaliser(`a ajouté le cheval ${val("n")}`, "cheval"), set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no") })),
       id && (() => update(ref(db, `foyers/${S.fid}`), Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(s => s.chevalId === id).map(s => [`soins/${s.id}`, null])]))), ["n"]);
   },
   contact(id) {
@@ -402,7 +467,7 @@ const actions = {
       champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
       champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle || "", "number", 'min="0" step="0.5" inputmode="decimal"') + prixChamps(l) +
       `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
-      () => set(id ? base(`foin/livraisons/${id}`) : push(base("foin/livraisons")), { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
+      () => (!id && journaliser(`a noté une livraison de ${balles(parseQte(val("b")))}`, "livraison"), set(id ? base(`foin/livraisons/${id}`) : push(base("foin/livraisons")), { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") })),
       id && (() => remove(base(`foin/livraisons/${id}`))), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
@@ -411,7 +476,7 @@ const actions = {
     ouvrir(id ? "Modifier la livraison" : "Livraison de copeaux",
       champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) + prixChamps(l) +
       `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
-      () => set(id ? base(`copeaux/livraisons/${id}`) : push(base("copeaux/livraisons")), { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") }),
+      () => (!id && journaliser(`a noté une livraison de ${balles(parseQte(val("b")))} de copeaux`, "copeaux"), set(id ? base(`copeaux/livraisons/${id}`) : push(base("copeaux/livraisons")), { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") })),
       id && (() => remove(base(`copeaux/livraisons/${id}`))), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
@@ -423,18 +488,19 @@ const actions = {
   finirBalle() {
     const p = prevision(S.foyer, aujourdhui()); if (!p) return;
     const r = p.stockAuj - Math.floor(p.stockAuj + 1e-6);
-    if (r > 0.01 && r < 0.99) return noterSortie(r);
+    if (r > 0.01 && r < 0.99) return noterSortie(r, ajd(), "a fini la balle entamée");
   },
   pas: (_i, d) => { const e = $("#" + d.c); e.value = fmtQte(Math.max(0, parseQte(e.value) + +d.p)); e.dispatchEvent(new Event("input", { bubbles: true })); },
   chip: (_i, d) => { const e = $("#" + d.c); e.value = d.q; e.dispatchEvent(new Event("input", { bubbles: true })); },
   vue: (_id, d) => { S.vue = d.v; window.scrollTo(0, 0); rendre(); },
   filtre: (_id, d) => { S.filtre = d.f; rendre(); },
   annee: (_id, d) => { S.annee += +d.d; rendre(); },
-  async soinFait(id) {
+  soinFait(id) {
     const s = S.foyer.soins[id], jr = ajd(), avant = s.dernier || "", r = push(base(`soins/${id}/passages`));
-    await update(base(`soins/${id}`), { dernier: jr });
-    await set(r, { date: jr, ts: Date.now() });
-    toast(`${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, async () => { await update(base(`soins/${id}`), { dernier: avant }); await remove(r); });
+    vibre();
+    const j = journaliser(`a noté ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin");
+    vite(update(base(`soins/${id}`), { dernier: jr })); vite(set(r, { date: jr, ts: Date.now() }));
+    toast(`${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, () => { update(base(`soins/${id}`), { dernier: avant }); remove(r); remove(j); });
   },
   soin(id) {
     const chev = liste(S.foyer.chevaux).filter(c => c.actif !== false || c.id === S.foyer.soins?.[id]?.chevalId).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
@@ -459,27 +525,107 @@ const actions = {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
     ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; return set(id ? base(chemin) : push(base("foin/inventaires")), o); },
+      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; if (!id) journaliser(`a compté ${balles(o.balles)} en stock`, "comptage"); return set(id ? base(chemin) : push(base("foin/inventaires")), o); },
       id && (() => remove(base(chemin))), ["d", "b"]);
   },
   inventaireCopeaux() {
     const i = S.foyer.copeaux?.inventaire || { date: ajd() };
     ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) }), null, ["b"]);
+      () => (journaliser(`a compté ${balles(parseQte(val("b")))} de copeaux`, "copeaux"), set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) })), null, ["b"]);
   },
   params() {
     const f = S.foyer.foin || {};
     ouvrir("Seuil d'alerte", `<p class="petit">L'accueil passe en alerte quand il reste moins de ce nombre de jours de foin.</p>` + champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"'),
       () => update(base("foin"), { seuilJours: +val("s") || 14 }));
   },
+  prenom() {
+    ouvrir("Mon prénom", `<p class="petit">Affiché dans l'activité de la famille.</p>` + champ("pr", "Prénom", S.foyer.membres?.[S.user.uid]?.nom || "", "text", 'autocomplete="given-name"'),
+      () => update(base(`membres/${S.user.uid}`), { nom: val("pr") }), null, ["pr"]);
+  },
+  res: (id, d) => { $("#drech").close(); actions[d.t](id); },
+  intro: () => intro(),
+  installer: async () => { if (S.install) { S.install.prompt(); await S.install.userChoice; S.install = null; rendre(); } },
   copier: () => navigator.clipboard?.writeText(S.foyer.code).then(() => toast("Code copié")),
-  sortie: () => signOut(auth).then(() => location.reload())
+  sortie: () => {
+    try { Object.keys(localStorage).filter(k => k.startsWith("ecurie-fid-") || k.startsWith("ecurie-foyer-")).forEach(k => localStorage.removeItem(k)); } catch { /* rien */ }
+    return signOut(auth).then(() => location.reload());
+  }
 };
 
 document.addEventListener("click", e => {
-  if (e.target.closest("a:not([data-a])")) return;
+  if (e.target.closest("a:not([data-a])") || Date.now() - bloque < 400) return;
   const el = e.target.closest("[data-a]");
   if (!el || !S.foyer) return;
   e.stopPropagation(); e.preventDefault();
   actions[el.dataset.a]?.(el.dataset.id, el.dataset);
 });
+
+/* ---------- Recherche ---------- */
+function chercher() {
+  const d = $("#drech");
+  d.innerHTML = `<div class="poignee"></div><div class="entete"><h2>Rechercher</h2><button class="ib" id="rfer" aria-label="Fermer">${ic("fermer")}</button></div>
+    <div class="formulaire"><input id="rq" type="search" placeholder="Cheval, soin, contact…" autocomplete="off" enterkeyhint="search"><div id="rres"></div></div>`;
+  $("#rfer").onclick = () => d.close();
+  const index = [
+    ...liste(S.foyer.chevaux).map(c => ({ t: "cheval", id: c.id, g: avatar(c.nom), titre: esc(c.nom), sous: [esc(c.robe || ""), c.sire ? "SIRE " + esc(c.sire) : ""].filter(Boolean).join(" · "), mots: norm([c.nom, c.robe, c.sire, c.notes].join(" ")) })),
+    ...liste(S.foyer.contacts).map(c => ({ t: "contact", id: c.id, g: bulle(ICONE_ROLE[c.role] || "user", "vert"), titre: esc(c.nom), sous: esc(c.role || ""), mots: norm([c.nom, c.role, c.adresse, c.tel, c.email, c.notes].join(" ")) })),
+    ...liste(S.foyer.soins).filter(s => S.foyer.chevaux?.[s.chevalId]).map(s => ({ t: "soin", id: s.id, g: bulle(ICONE_SOIN[s.type] || "croix"), titre: `${esc(libelleSoin(s))} · ${esc(nomCheval(s.chevalId))}`, sous: "Soin", mots: norm([libelleSoin(s), nomCheval(s.chevalId), s.note].join(" ")) }))
+  ];
+  const maj = () => {
+    const mots = norm($("#rq").value).split(/\s+/).filter(Boolean);
+    const r = mots.length ? index.filter(x => mots.every(m => x.mots.includes(m))).slice(0, 20) : [];
+    $("#rres").innerHTML = r.length ? r.map(x => rangee({ gauche: x.g, titre: x.titre, sous: x.sous, a: "res", id: x.id }).replace('data-a="res"', `data-a="res" data-t="${x.t}"`)).join("")
+      : `<p class="petit sobre">${mots.length ? "Aucun résultat." : "Tape un nom de cheval, un type de soin ou un contact."}</p>`;
+  };
+  $("#rq").oninput = maj; maj();
+  d.showModal(); $("#rq").focus();
+}
+$("#rech").onclick = chercher;
+$("#drech").addEventListener("click", e => { if (e.target === $("#drech")) $("#drech").close(); });
+
+/* ---------- Présentation au premier lancement ---------- */
+function intro() {
+  const etapes = [
+    ["blé", "Retire une balle en un geste", "Sur l'accueil, touche − 1, − ½, − ⅓ ou − ¼ : le stock est mis à jour pour toute la famille. Tu peux annuler juste après."],
+    ["check", "Glisse pour valider un soin", "Dans Soins, glisse une ligne vers la droite quand c'est fait. La prochaine échéance se calcule toute seule."],
+    ["users", "Toute la famille voit tout", "Chacun voit en direct ce que les autres notent. Sans réseau, l'application reste utilisable et envoie les changements au retour du réseau."]
+  ];
+  let n = 0; const d = $("#intro");
+  const dessiner = () => {
+    const [i, t, p] = etapes[n];
+    d.innerHTML = `<div class="intro-c">${bulle(i, "grande")}<h2>${t}</h2><p>${p}</p>
+      <div class="points">${etapes.map((_, k) => `<i class="${k === n ? "actif" : ""}"></i>`).join("")}</div>
+      <button class="btn plein" id="isuiv">${n < etapes.length - 1 ? "Suivant" : "C'est parti"}</button>
+      ${n < etapes.length - 1 ? `<button class="btn sec plein" id="ipasser" style="margin-top:8px">Passer</button>` : ""}</div>`;
+    $("#isuiv").onclick = () => { if (n < etapes.length - 1) { n++; dessiner(); } else fin(); };
+    if ($("#ipasser")) $("#ipasser").onclick = fin;
+  };
+  const fin = () => { ecrireLocal("ecurie-intro", "1"); d.close(); };
+  dessiner(); d.showModal();
+}
+
+/* ---------- Glisser pour valider un soin ---------- */
+let geste = null, bloque = 0;
+document.addEventListener("pointerdown", e => {
+  const r = e.target.closest(".glisse .rangee");
+  if (!r || e.target.closest("button,a")) return;
+  geste = { r, x: e.clientX, y: e.clientY, dx: 0, actif: false };
+});
+document.addEventListener("pointermove", e => {
+  if (!geste) return;
+  const dx = e.clientX - geste.x, dy = e.clientY - geste.y;
+  if (!geste.actif && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) { geste.actif = true; geste.r.setPointerCapture?.(e.pointerId); }
+  if (geste.actif) { geste.dx = Math.max(0, dx); geste.r.style.transition = "none"; geste.r.style.transform = `translateX(${geste.dx}px)`; }
+});
+const finGeste = () => {
+  if (!geste) return;
+  const { r, dx, actif } = geste; geste = null;
+  r.style.transition = "";
+  if (!actif) return;
+  bloque = Date.now();
+  if (dx > 110) { r.style.transform = "translateX(110%)"; actions.soinFait(r.dataset.id); } else r.style.transform = "";
+};
+document.addEventListener("pointerup", finGeste); document.addEventListener("pointercancel", finGeste);
+
+/* ---------- Installation ---------- */
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); S.install = e; if (S.foyer) rendre(); });
