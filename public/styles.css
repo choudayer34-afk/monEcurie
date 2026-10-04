@@ -267,3 +267,10 @@ input[type=search]{-webkit-appearance:none;appearance:none}
 .fiche-t .corps{flex:1;min-width:0}
 .avatar.grand{width:64px;height:64px;font-size:1.7rem}
 .petit-b{min-height:40px;padding:0 14px;font-size:.9rem}
+
+img.avatar{object-fit:cover;background:var(--bg2)}
+.photo-zone{display:flex;align-items:center;gap:16px;margin:8px 0 4px}
+.photo-zone .avatar.grand{width:88px;height:88px;font-size:2.2rem}
+.photo-btns{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.photo-btns label{margin:0;font-size:.9rem;color:var(--prim-t);cursor:pointer}
+a.rangee{color:inherit;text-decoration:none}

@@ -38,6 +38,7 @@ const I = {
   dent: '<path d="M9 3c-2.5 0-4 2-4 4.5 0 2 1 3.5 1.5 5.5.5 2.5.5 8 2.5 8 1.8 0 1.5-5 3-5s1.2 5 3 5c2 0 2-5.5 2.5-8 .5-2 1.5-3.5 1.5-5.5C19 5 17.5 3 15 3c-1.5 0-2 1-3 1S10.5 3 9 3z"/>',
   sapin: '<path d="M12 3l6 8h-3.5l4.5 7H5l4.5-7H6z"/><path d="M12 18v3"/>',
   crayon: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
+  photo: '<path d="M4 8h3l1.500-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.500"/>',
   retour: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
   copie: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   calendrier: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
@@ -168,6 +169,17 @@ function ecranFoyer() {
 const AVATARS = 6;
 const teinte = t => [...String(t)].reduce((s, c) => s + c.charCodeAt(0), 0) % AVATARS;
 const avatar = nom => `<span class="avatar a${teinte(nom)}">${esc((nom || "?").trim().charAt(0).toUpperCase())}</span>`;
+const avatarC = (c, cls = "") => c.photo ? `<img class="avatar ${cls}" src="${esc(c.photo)}" alt="">` : `<span class="avatar ${cls} a${teinte(c.nom)}">${esc((c.nom || "?").trim().charAt(0).toUpperCase())}</span>`;
+// Réduit une photo (recadrage centré, carré) pour la stocker dans la base sans service supplémentaire
+const reduire = (fichier, taille = 320) => new Promise((ok, ko) => {
+  const img = new Image(), u = URL.createObjectURL(fichier);
+  img.onload = () => {
+    const s = Math.min(img.width, img.height), cv = document.createElement("canvas"); cv.width = cv.height = taille;
+    cv.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, taille, taille);
+    URL.revokeObjectURL(u); ok(cv.toDataURL("image/jpeg", 0.78));
+  };
+  img.onerror = ko; img.src = u;
+});
 const bulle = (icone, classe = "") => `<span class="bulle ${classe}">${ic(icone)}</span>`;
 const entete = (titre, droite = "") => `<div class="entete"><h2>${titre}</h2><div class="droite">${droite}</div></div>`;
 const bouton = (icone, a, extra = "", label = "") => `<button class="ib" data-a="${a}" ${extra} aria-label="${label}" title="${label}">${ic(icone)}</button>`;
@@ -177,11 +189,35 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const vues = { accueil, chevaux, soins, foin, contacts, reglages, journal, fiche };
-const TITRES = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité" };
+const ADMIN = "ch-houdayer@hotmail.fr";
+const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
+const SERVICES = [
+  ["Firebase — vue d'ensemble", "Projet monecurie-f3055", "https://console.firebase.google.com/project/monecurie-f3055/overview"],
+  ["Firebase — Authentication", "Comptes et utilisateurs", "https://console.firebase.google.com/project/monecurie-f3055/authentication/users"],
+  ["Firebase — Realtime Database", "Données et règles de sécurité", "https://console.firebase.google.com/project/monecurie-f3055/database"],
+  ["Google Cloud — clés API", "Restrictions de la clé web, quotas", "https://console.cloud.google.com/apis/credentials?project=monecurie-f3055"],
+  ["Cloudflare — Workers", "Application « ecurie » et rappels « ecurie-rappels »", "https://dash.cloudflare.com/?to=/:account/workers-and-pages"],
+  ["GitHub — dépôt monEcurie", "Code source et historique", "https://github.com/choudayer34-afk/monEcurie"],
+  ["Resend — e-mails", "Envois, domaine, clé API", "https://resend.com/emails"]
+];
+function admin() {
+  const f = S.foyer, nb = o => liste(o).length, dern = liste(f.journal).reduce((m, j) => Math.max(m, j.ts || 0), 0);
+  const lien = ([t, s, u]) => `<a class="rangee" href="${u}" target="_blank" rel="noopener"><div class="corps"><div class="titre">${t}</div><div class="petit">${s}</div></div><span class="chev">${ic("droite")}</span></a>`;
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="reglages">${ic("gauche")} Foyer</button></div>
+    <div class="carte">${entete("Services")}${SERVICES.map(lien).join("")}</div>
+    <div class="carte">${entete("Diagnostic du foyer")}
+      ${[["Compte", esc(S.user.email)], ["Identifiant", esc(S.user.uid)], ["Foyer", esc(f.nom || "")], ["Membres", nb(f.membres)], ["Chevaux", nb(f.chevaux)], ["Contacts", nb(f.contacts)], ["Soins", nb(f.soins)],
+        ["Comptages de foin", nb(f.foin?.inventaires)], ["Livraisons de foin", nb(f.foin?.livraisons)], ["Sorties de foin", nb(f.foin?.sorties)], ["Entrées d'activité", nb(f.journal)],
+        ["Dernière activité", dern ? new Date(dern).toLocaleString("fr-FR") : "—"], ["Connexion", $("#hors").hidden ? "En ligne" : "Hors ligne"]]
+        .map(([a, b]) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` })).join("")}</div>
+    <div class="carte petit">Aucune clé ni aucun secret n'est stocké dans l'application : les accès passent par ton compte sur chaque service.</div>`;
+}
+const vues = { accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux", soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité", admin: "Administration" };
 
 function rendre() {
   if (!S.foyer) return;
+  if (S.vue === "admin" && !estAdmin()) S.vue = "reglages";
   if (S.vue === "fiche" && !S.foyer.chevaux?.[S.cheval]) S.vue = "chevaux";
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" ? "chevaux" : S.vue)));
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
@@ -194,6 +230,7 @@ function rendre() {
     contacts: "Fournisseurs et soignants",
     reglages: "Partage et compte",
     journal: "Ce que fait la famille",
+    admin: "Services et diagnostic",
     fiche: "Fiche du cheval"
   }[S.vue];
   const y = window.scrollY;
@@ -332,7 +369,7 @@ function chevaux() {
   return (l.length ? `<div class="carte liste">${l.map(c => {
     const prochain = plan.find(s => s.chevalId === c.id && s.j !== null);
     return rangee({
-      gauche: avatar(c.nom), classe: c.actif === false ? "inactif" : "", a: "fiche", id: c.id, titre: esc(c.nom),
+      gauche: avatarC(c), classe: c.actif === false ? "inactif" : "", a: "fiche", id: c.id, titre: esc(c.nom),
       sous: [esc(c.robe || ""), age(c.naissance), c.sire ? "SIRE " + esc(c.sire) : "", c.actif === false ? "inactif" : ""].filter(Boolean).join(" · ") || "Fiche à compléter",
       droite: prochain ? `<span class="badge ${urgence(prochain.j)}">${ic(ICONE_SOIN[prochain.type])}${quand(prochain.j)}</span>` : `<span class="chev">${ic("droite")}</span>`
     });
@@ -351,7 +388,7 @@ function fiche() {
   hist.sort((x, y) => y.date.localeCompare(x.date));
   const infos = [c.robe && esc(c.robe), c.naissance && `${age(c.naissance)} (né le ${fr(c.naissance)})`, c.sire && "SIRE " + esc(c.sire), c.actif === false && "inactif"].filter(Boolean);
   return `<div class="chips"><button class="chip" data-a="vue" data-v="chevaux">${ic("gauche")} Chevaux</button></div>
-    <div class="carte fiche-t"><span class="avatar grand a${teinte(c.nom)}">${esc((c.nom || "?").charAt(0).toUpperCase())}</span>
+    <div class="carte fiche-t">${avatarC(c, "grand")}
       <div class="corps"><h2>${esc(c.nom)}</h2><div class="petit">${infos.join(" · ") || "Fiche à compléter"}</div></div>
       ${bouton("crayon", "cheval", `data-id="${S.cheval}"`, "Modifier la fiche")}</div>
     <div class="carte">${entete("Soins à prévoir", `<button class="btn sec petit-b" data-a="soin" data-cheval="${S.cheval}">${ic("plus")} Soin</button>`)}
@@ -445,6 +482,7 @@ function reglages() {
     <div class="carte">${entete("Membres", bouton("crayon", "prenom", "", "Modifier mon prénom"))}${m.map(x => rangee({ gauche: avatar(x.nom || x.email), titre: esc(x.nom || x.email), sous: x.nom ? esc(x.email) : "" })).join("")}</div>
     ${S.install ? `<button class="btn plein" data-a="installer">${ic("plus")} Installer l'application</button>` : ""}
     ${ios ? `<div class="carte petit">Sur iPhone : touche le bouton Partager, puis « Sur l'écran d'accueil » pour installer l'application.</div>` : ""}
+    ${estAdmin() ? `<button class="btn sec plein" data-a="vue" data-v="admin">${ic("fer")} Administration</button>` : ""}
     <button class="btn sec plein" data-a="intro">Revoir la présentation</button>
     <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>`;
 }
@@ -517,14 +555,23 @@ const actions = {
   fiche: id => { S.cheval = id; S.vue = "fiche"; window.scrollTo(0, 0); rendre(); },
   cheval(id) {
     const c = id ? S.foyer.chevaux[id] : { actif: true };
+    let photo = c.photo || "";
     ouvrir(id ? "Modifier le cheval" : "Nouveau cheval",
+      `<div class="photo-zone"><span id="phApercu">${avatarC(c, "grand")}</span><div class="photo-btns">
+        <label class="btn sec petit-b" for="ph">${ic("photo")} Photo</label><input id="ph" type="file" accept="image/*" hidden>
+        <button type="button" class="btn sec petit-b" id="phRetirer">Retirer</button></div></div>` +
       champ("n", "Nom", c.nom, "text", 'autocomplete="off"') +
       `<div class="duo">${champ("r", "Robe", c.robe)}${champ("na", "Naissance", c.naissance, "date")}</div>` +
       champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters" autocomplete="off"') +
       `<label class="interrupteur"><input type="checkbox" id="ac" ${c.actif !== false ? "checked" : ""}><span class="rail"></span>Cheval actif</label>` +
       `<label for="no">Notes</label><textarea id="no" rows="3">${esc(c.notes)}</textarea>`,
-      () => (!id && journaliser(`a ajouté le cheval ${val("n")}`, "cheval"), set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no") })),
+      () => (!id && journaliser(`a ajouté le cheval ${val("n")}`, "cheval"), set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no"), photo })),
       id && (() => update(ref(db, `foyers/${S.fid}`), Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(s => s.chevalId === id).map(s => [`soins/${s.id}`, null])]))), ["n"]);
+    $("#ph").onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try { photo = await reduire(f); $("#phApercu").innerHTML = avatarC({ nom: val("n") || c.nom, photo }, "grand"); } catch { toast("Photo illisible"); }
+    };
+    $("#phRetirer").onclick = () => { photo = ""; $("#phApercu").innerHTML = avatarC({ nom: val("n") || c.nom || "?", photo: "" }, "grand"); };
   },
   contact(id) {
     const c = id ? S.foyer.contacts[id] : { role: "Fournisseur de foin" };
@@ -653,7 +700,7 @@ function chercher() {
     <div class="formulaire"><input id="rq" type="search" placeholder="Cheval, soin, contact…" autocomplete="off" enterkeyhint="search"><div id="rres"></div></div>`;
   $("#rfer").onclick = () => d.close();
   const index = [
-    ...liste(S.foyer.chevaux).map(c => ({ t: "cheval", id: c.id, g: avatar(c.nom), titre: esc(c.nom), sous: [esc(c.robe || ""), c.sire ? "SIRE " + esc(c.sire) : ""].filter(Boolean).join(" · "), mots: norm([c.nom, c.robe, c.sire, c.notes].join(" ")) })),
+    ...liste(S.foyer.chevaux).map(c => ({ t: "cheval", id: c.id, g: avatarC(c), titre: esc(c.nom), sous: [esc(c.robe || ""), c.sire ? "SIRE " + esc(c.sire) : ""].filter(Boolean).join(" · "), mots: norm([c.nom, c.robe, c.sire, c.notes].join(" ")) })),
     ...liste(S.foyer.contacts).map(c => ({ t: "contact", id: c.id, g: bulle(ICONE_ROLE[c.role] || "user", "vert"), titre: esc(c.nom), sous: esc(c.role || ""), mots: norm([c.nom, c.role, c.adresse, c.tel, c.email, c.notes].join(" ")) })),
     ...liste(S.foyer.soins).filter(s => S.foyer.chevaux?.[s.chevalId]).map(s => ({ t: "soin", id: s.id, g: bulle(ICONE_SOIN[s.type] || "croix"), titre: `${esc(libelleSoin(s))} · ${esc(nomCheval(s.chevalId))}`, sous: "Soin", mots: norm([libelleSoin(s), nomCheval(s.chevalId), s.note].join(" ")) }))
   ];
