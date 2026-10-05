@@ -221,6 +221,12 @@ function rendre() {
   if (S.vue === "fiche" && !S.foyer.chevaux?.[S.cheval]) S.vue = "chevaux";
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" ? "chevaux" : S.vue)));
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
+  const nbSoins = soinsPrevus().filter(x => S.foyer.chevaux[x.chevalId].actif !== false && x.j !== null && x.j <= 0).length;
+  const bs = document.querySelector("nav button[data-v=soins]");
+  bs.querySelector(".pastille")?.remove();
+  if (nbSoins) bs.insertAdjacentHTML("beforeend", `<span class="pastille" aria-label="${nbSoins} soins à faire">${nbSoins > 9 ? "9+" : nbSoins}</span>`);
+  bs.title = nbSoins ? `Soins (${nbSoins} à faire)` : "Soins";
+  try { nbSoins ? navigator.setAppBadge?.(nbSoins) : navigator.clearAppBadge?.(); } catch { /* non pris en charge */ }
   $("#titre").textContent = S.vue === "fiche" ? nomCheval(S.cheval) : TITRES[S.vue];
   $("#sous").textContent = {
     accueil: new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
@@ -456,6 +462,7 @@ function foin() {
   const f = S.foyer.foin || {}, cop = S.foyer.copeaux || {};
   const cs = comptages(S.foyer).reverse(), per = Object.fromEntries(periodes(S.foyer).map(p => [p.idFin, p]));
   const livs = liste(f.livraisons).sort((a, b) => b.date.localeCompare(a.date));
+  const sorties = liste(f.sorties).sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.ts || 0) - (a.ts || 0)).slice(0, 12);
   const livC = liste(cop.livraisons).sort((a, b) => b.date.localeCompare(a.date));
   const nomC = id => esc(S.foyer.contacts?.[id]?.nom || "");
   const lignesLiv = (l, a) => l.map(x => rangee({
@@ -468,6 +475,8 @@ function foin() {
         gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
         sous: p ? (p.conso < 0 ? `<span class="q retard">Incohérent : livraison oubliée ?</span>` : `${balles(Math.round(p.conso * 100) / 100)} consommées en ${p.jours} j (${taux(p.rate)}/jour)`) : "Premier comptage"
       }); }).join("") : `<p class="petit sobre">Aucun comptage. Tu peux saisir ceux des années passées pour affiner la prévision.</p>`}</div>
+    <div class="carte">${entete("Sorties récentes")}${sorties.length ? sorties.map(x => rangee({
+        gauche: bulle("retour", "or"), a: "sortieEdit", id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`, sous: "Touche pour corriger ou supprimer" })).join("") : `<p class="petit sobre">Aucune sortie notée.</p>`}</div>
     <div class="carte">${entete("Livraisons de foin", bouton("plus", "livraison", "", "Nouvelle livraison"))}${livs.length ? lignesLiv(livs, "livraison") : `<p class="petit sobre">Aucune livraison notée.</p>`}</div>
     <div class="carte">${entete("Copeaux de bois", bouton("check", "inventaireCopeaux", "", "Comptage") + bouton("plus", "livraisonCopeaux", "", "Nouvelle livraison"))}
       <p class="petit sobre">${cop.inventaire ? `Dernier comptage : <b>${balles(+cop.inventaire.balles || 0)}</b> le ${fr(cop.inventaire.date)}` : "Aucun comptage."}</p>${lignesLiv(livC, "livraisonCopeaux")}</div>`;
@@ -617,6 +626,12 @@ const actions = {
     if (d?.q && d.q !== "autre") return noterSortie(parseQte(d.q));
     ouvrir("Retirer du stock", qte("b", "Quantité retirée (balles)", "", ["1/4", "1/3", "1/2", "2/3", "1", "2"]) + champ("d", "Date", ajd(), "date"),
       () => noterSortie(parseQte(val("b")), val("d") || ajd()), null, ["b"]);
+  },
+  sortieEdit(id) {
+    const x = S.foyer.foin?.sorties?.[id]; if (!x) return;
+    ouvrir("Corriger la sortie", qte("b", "Quantité retirée (balles)", fmtQte(+x.balles || 0), ["1/4", "1/3", "1/2", "2/3", "1", "2"]) + champ("d", "Date", x.date, "date"),
+      () => (parseQte(val("b")) > 0 ? update(base(`foin/sorties/${id}`), { balles: parseQte(val("b")), date: val("d") || x.date }) : Promise.resolve()),
+      () => { journaliser(`a supprimé une sortie de ${balles(+x.balles || 0)} (${frCourt(x.date)})`, "sortie"); return remove(base(`foin/sorties/${id}`)); }, ["b"]);
   },
   finirBalle() {
     const p = prevision(S.foyer, aujourdhui()); if (!p) return;
