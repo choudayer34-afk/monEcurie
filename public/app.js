@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, remove, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles } from "./prevision.js";
+import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles } from "./prevision.js";
 import { TYPES, libelleSoin, echeance, joursAvant } from "./soins.js";
 
 const app = initializeApp(firebaseConfig);
@@ -250,6 +250,15 @@ function pile(stock, g) {
   if (g) for (let i = 0; i < g.n; i++) h += balleSvg(1, "fantome", `style="animation-delay:-${g.ecoule}ms"`);
   return `<div class="pile" role="img" aria-label="${fmtQte(stock)} balles en stock">${h}</div>${groupe ? `<p class="legende-h">1 tas = ${TAS} balles</p>` : ""}`;
 }
+function majStock(p) {
+  const auj = aujourdhui(), f = S.foyer.foin || {}, d = p.last.date;
+  const so = liste(f.sorties).filter(x => sortieApres(x, p.last) && x.date <= auj_ch(auj)).sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.ts || 0) - (a.ts || 0));
+  const nl = liste(f.livraisons).filter(l => l.date > d && l.date <= auj_ch(auj)).length;
+  const dern = so[0] ? ` · dernière sortie le <b>${fr(so[0].date)}</b>` : " · aucune sortie depuis";
+  const liv = nl ? ` · ${nl} livraison${nl > 1 ? "s" : ""} ajoutée${nl > 1 ? "s" : ""}` : "";
+  return `<p class="hero-m">Calculé depuis le comptage du <b>${fr(d)}</b> (${fmtQte(+p.last.balles || 0)})${dern}${so.length > 1 ? ` (${so.length} sorties)` : ""}${liv}</p>`;
+}
+const auj_ch = enChaine;
 function hero(p, seuil, g) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
     <p class="hero-s">Compte tes balles pour démarrer le suivi du stock.</p><button class="btn or" data-a="inventaire">Premier comptage</button></section>`;
@@ -261,8 +270,8 @@ function hero(p, seuil, g) {
     ${prev ? `<div class="hero-n">${p.jours === null ? "4 ans +" : p.jours}<small>${p.jours === null ? "" : p.jours <= 1 ? " jour" : " jours"}</small></div>
       <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
       <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
-    : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div><p class="hero-s">Au comptage du ${fr(p.last.date)}, livraisons comprises.</p>`}
-  ${pile(p.stockAuj, g)}
+    : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div>`}
+  ${pile(p.stockAuj, g)}${majStock(p)}
   </section>`;
 }
 
