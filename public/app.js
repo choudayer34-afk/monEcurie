@@ -487,11 +487,11 @@ document.addEventListener("pointermove", e => {
   const sv = e.target.closest?.(".courbe"), tip = $("#cvtip"); if (!sv || !S.cv || !tip) return;
   const { c, jmin, jmax, gauche, droite, W } = S.cv, r = sv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W;
   const j = Math.round(jmin + (x - gauche) / (W - gauche - droite) * (jmax - jmin)); if (j < jmin || j > jmax) return;
-  const h = c.hist.find(q => q.j === j), a = c.A?.pts.find(q => q.j === j), b = c.B?.pts.find(q => q.j === j);
+  const cp = c.comp.find(q => q.j === j), h = c.hist.find(q => q.j === j), a = c.A?.pts.find(q => q.j === j), b = c.B?.pts.find(q => q.j === j);
   const ap = j > c.jAuj && c.A && !a ? 0 : a?.s, bp = j > c.jAuj && c.B && !b ? 0 : b?.s;
   const cr = $("#cvx"); cr.setAttribute("x1", gauche + (j - jmin) / (jmax - jmin) * (W - gauche - droite)); cr.setAttribute("x2", cr.getAttribute("x1")); cr.style.display = "block";
   const v = n => `${Math.round(n * 10) / 10}`.replace(".", ",");
-  tip.innerHTML = `<b>${frCourt(enChaine(j))} ${enChaine(j).slice(0, 4)}</b>` + (h ? `<div>Stock : ${v(h.s)} balles</div>` : "") + (ap != null && j >= c.jAuj ? `<div><i class="k a"></i>Années préc. : ${v(ap)}</div>` : "") + (bp != null && j >= c.jAuj ? `<div><i class="k b"></i>Conso actuelle : ${v(bp)}</div>` : "");
+  tip.innerHTML = `<b>${frCourt(enChaine(j))} ${enChaine(j).slice(0, 4)}</b>` + (h ? `<div>Stock : ${v(h.s)} balles</div>` : "") + (cp ? `<div>Comptage : ${v(cp.s)}${cp.avant != null && Math.abs(cp.avant - cp.s) >= 0.05 ? ` (calculé ${v(cp.avant)})` : ""}</div>` : "") + (ap != null && j >= c.jAuj ? `<div><i class="k a"></i>Années préc. : ${v(ap)}</div>` : "") + (bp != null && j >= c.jAuj ? `<div><i class="k b"></i>Conso actuelle : ${v(bp)}</div>` : "");
   tip.hidden = false; const pc = (e.clientX - r.left) / r.width; tip.style.left = `${Math.min(Math.max(pc * 100, 22), 78)}%`;
 });
 document.addEventListener("pointerleave", e => { if (e.target.closest?.(".courbe")) { $("#cvtip")?.setAttribute("hidden", ""); { const x = $("#cvx"); if (x) x.style.display = "none"; } } }, true);

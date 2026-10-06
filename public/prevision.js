@@ -51,13 +51,7 @@ export function prevision(f, auj) {
   const sort = {}; let nbSort = 0, totSort = 0;
   liste(f.foin?.sorties).filter(s => sortieApres(s, last)).forEach(s => { const j = jour(s.date); { sort[j] = (sort[j] || 0) + (+s.balles || 0); nbSort++; if (j <= auj) totSort += +s.balles || 0; } });
   const reel = nbSort > 0;
-  const sum = Array(12).fill(0), n = Array(12).fill(0); let tot = 0, totN = 0;
-  for (const p of periodes(f)) {
-    if (p.conso < 0) continue; // incohérent (livraison oubliée ?) : ignoré
-    const r = p.rate;
-    for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += r; n[m]++; tot += r; totN++; }
-  }
-  const historique = totN > 0, moy = historique ? tot / totN : 0, taux = m => (n[m] ? sum[m] / n[m] : moy);
+  const { historique, taux } = tauxMois(f);
   let stock = (+last.balles || 0) - (lj <= auj ? (sort[lj] || 0) : 0), stockAuj = lj >= auj ? stock : null, rupture = null;
   for (let i = 0; i < 1500; i++) {
     const j = lj + 1 + i;
@@ -80,6 +74,14 @@ function tauxMois(f) {
   for (const p of periodes(f)) {
     if (p.conso < 0) continue;
     for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += p.rate; n[m]++; tot += p.rate; totN++; }
+  }
+  // Consommation réelle notée depuis le dernier comptage (jour par jour, jusqu'à la dernière sortie)
+  const cs = comptages(f);
+  if (cs.length) {
+    const last = cs[cs.length - 1], lj = jour(last.date), sort = {};
+    liste(f.foin?.sorties).filter(s => sortieApres(s, last)).forEach(s => { const j = jour(s.date); sort[j] = (sort[j] || 0) + (+s.balles || 0); });
+    const js = Object.keys(sort).map(Number);
+    if (js.length) for (let j = lj + 1; j <= Math.max(...js); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += sort[j] || 0; n[m]++; tot += sort[j] || 0; totN++; }
   }
   const moy = totN ? tot / totN : 0;
   return { historique: totN > 0, taux: m => (n[m] ? sum[m] / n[m] : moy) };
@@ -110,6 +112,18 @@ export function courbeStock(f, auj) {
   const hist = [{ j: comp[0].j, s: comp[0].s }];
   for (let i = 1; i < cs.length; i++) {
     const a = comp[i - 1], b = comp[i]; if (b.j <= a.j) continue;
+    const seg = liste(f.foin?.sorties).filter(x => sortieApres(x, cs[i - 1]) && !sortieApres(x, cs[i]));
+    if (seg.length) {
+      // Consommation notée : le stock suit les sorties, le comptage ne fait que rectifier
+      const so = {}; seg.forEach(x => { const j = jour(x.date); so[j] = (so[j] || 0) + (+x.balles || 0); });
+      let s = a.s - (so[a.j] || 0); hist[hist.length - 1] = { j: a.j, s: Math.max(0, s) };
+      for (let j = a.j + 1; j <= b.j; j++) {
+        s += (livs[j] || 0) - (so[j] || 0);
+        if (j === b.j) { comp[i].avant = s; s = b.s; }
+        hist.push({ j, s: Math.max(0, s) });
+      }
+      continue;
+    }
     const pr = per.find(x => x.idFin === cs[i].id), rate = pr ? Math.max(0, pr.rate) : 0; let s = a.s;
     for (let j = a.j + 1; j <= b.j; j++) { s += (livs[j] || 0) - rate; if (j === b.j) s = b.s; hist.push({ j, s: Math.max(0, s) }); }
   }
