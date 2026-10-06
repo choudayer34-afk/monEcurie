@@ -75,6 +75,7 @@ function tauxMois(f) {
     if (p.conso < 0) continue;
     for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += p.rate; n[m]++; tot += p.rate; totN++; }
   }
+  const historique = totN > 0; // historique réel : au moins deux comptages d'écart
   // Consommation réelle notée depuis le dernier comptage (jour par jour, jusqu'à la dernière sortie)
   const cs = comptages(f);
   if (cs.length) {
@@ -84,7 +85,7 @@ function tauxMois(f) {
     if (js.length) for (let j = lj + 1; j <= Math.max(...js); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += sort[j] || 0; n[m]++; tot += sort[j] || 0; totN++; }
   }
   const moy = totN ? tot / totN : 0;
-  return { historique: totN > 0, taux: m => (n[m] ? sum[m] / n[m] : moy) };
+  return { historique, taux: m => (n[m] ? sum[m] / n[m] : moy) };
 }
 
 // Balles à prévoir sur les N prochains jours (null s'il n'y a pas encore d'historique)

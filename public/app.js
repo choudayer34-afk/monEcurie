@@ -474,13 +474,14 @@ function courbe() {
   const lignes = [
     c.A ? `<div class="cv-l"><i class="k a"></i><span>Années précédentes : ${dans(c.A)}</span></div>` : "",
     c.B ? `<div class="cv-l"><i class="k b"></i><span>Consommation actuelle (${taux(c.rateB)} balle/j sur ${c.fenetre} j) : ${dans(c.B)}</span></div>` : "",
-    !c.A && !c.B ? `<p class="petit sobre">Les projections apparaissent après un 2e comptage ou quelques sorties notées.</p>` : `<p class="petit sobre">Projections sans nouvelle livraison.</p>`
+    !c.A ? `<p class="petit sobre">La courbe « années précédentes » apparaîtra quand tu auras au moins deux comptages d'écart (idéalement sur une année complète).</p>` : "",
+    c.A || c.B ? `<p class="petit sobre">Projections sans nouvelle livraison.</p>` : (c.A ? "" : `<p class="petit sobre">La projection sur la consommation actuelle apparaîtra après une semaine de sorties notées.</p>`)
   ].join("");
   const chip = (v, t) => `<button class="chip ${S.hist === v ? "actif" : ""}" data-a="histo" data-h="${v}">${t}</button>`;
   return `<div class="carte cv-carte">${entete("Évolution du stock", `<div class="chips pet">${chip(180, "6 mois")}${chip(365, "1 an")}${chip(0, "Tout")}</div>`)}
     <svg viewBox="0 0 ${W} ${H}" class="courbe" role="img" aria-label="Évolution du stock de foin en balles, avec projections">${svg}</svg>
     <div class="tip" id="cvtip" hidden></div>
-    <div class="legende"><span><i class="l h"></i>Stock</span><span><i class="l a"></i>Années préc.</span><span><i class="l b"></i>Conso actuelle</span><span><i class="pt liv"></i>Livraison</span><span><i class="pt cpt"></i>Comptage</span></div>
+    <div class="legende"><span><i class="l h"></i>Stock</span>${c.A ? `<span><i class="l a"></i>Années préc.</span>` : ""}${c.B ? `<span><i class="l b"></i>Conso actuelle</span>` : ""}${c.livraisons.length ? `<span><i class="pt liv"></i>Livraison</span>` : ""}<span><i class="pt cpt"></i>Comptage</span></div>
     <div class="cv-res">${lignes}</div></div>`;
 }
 document.addEventListener("pointermove", e => {
