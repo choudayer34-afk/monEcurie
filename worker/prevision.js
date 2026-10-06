@@ -100,3 +100,37 @@ export function depensesMensuelles(f) {
   liste(f.copeaux?.livraisons).forEach(l => ajouter(l, "copeaux"));
   return m;
 }
+
+// Courbe du stock : historique reconstitué (comptages, livraisons, sorties) + deux projections sans nouvelle livraison
+export function courbeStock(f, auj) {
+  const cs = comptages(f); if (!cs.length) return null;
+  const { historique, taux } = tauxMois(f);
+  const livs = {}; liste(f.foin?.livraisons).forEach(l => { const j = jour(l.date); livs[j] = (livs[j] || 0) + (+l.balles || 0); });
+  const comp = cs.map(c => ({ j: jour(c.date), s: +c.balles || 0 })), per = periodes(f), last = cs[cs.length - 1], lj = comp[comp.length - 1].j;
+  const hist = [{ j: comp[0].j, s: comp[0].s }];
+  for (let i = 1; i < cs.length; i++) {
+    const a = comp[i - 1], b = comp[i]; if (b.j <= a.j) continue;
+    const pr = per.find(x => x.idFin === cs[i].id), rate = pr ? Math.max(0, pr.rate) : 0; let s = a.s;
+    for (let j = a.j + 1; j <= b.j; j++) { s += (livs[j] || 0) - rate; if (j === b.j) s = b.s; hist.push({ j, s: Math.max(0, s) }); }
+  }
+  const sort = {}; liste(f.foin?.sorties).filter(x => sortieApres(x, last)).forEach(x => { const j = jour(x.date); sort[j] = (sort[j] || 0) + (+x.balles || 0); });
+  const reel = Object.keys(sort).length > 0;
+  let s = comp[comp.length - 1].s - (lj <= auj ? (sort[lj] || 0) : 0);
+  hist[hist.length - 1] = { j: lj, s: Math.max(0, s) };
+  for (let j = lj + 1; j <= auj; j++) {
+    s += (livs[j] || 0) - (reel ? (sort[j] || 0) : (historique ? taux(new Date(j * 864e5).getUTCMonth()) : 0));
+    hist.push({ j, s: Math.max(0, s) });
+  }
+  const fin = hist[hist.length - 1], sAuj = fin.s, jAuj = fin.j;
+  const proj = (rateDe) => { const pts = [{ j: jAuj, s: sAuj }]; let v = sAuj, rupture = null; for (let i = 1; i <= 366; i++) { const j = jAuj + i; v -= rateDe(j); if (v <= 0) { pts.push({ j, s: 0 }); rupture = j; break; } pts.push({ j, s: v }); } return { pts, rupture }; };
+  const A = historique && sAuj > 0 ? proj(j => taux(new Date(j * 864e5).getUTCMonth())) : null;
+  // Consommation actuelle : moyenne des 30 derniers jours (au moins 7 jours d'historique)
+  const idx = Object.fromEntries(hist.map(h => [h.j, h.s])), W = Math.min(30, jAuj - hist[0].j);
+  let B = null, rateB = null;
+  if (W >= 7 && sAuj > 0) {
+    const liv = Object.entries(livs).filter(([j]) => +j > jAuj - W && +j <= jAuj).reduce((t, [, n]) => t + n, 0);
+    rateB = ((idx[jAuj - W] ?? hist[0].s) + liv - sAuj) / W;
+    if (rateB > 0.005) B = proj(() => rateB); else rateB = null;
+  }
+  return { hist, comp, livraisons: Object.entries(livs).map(([j, n]) => ({ j: +j, n })).filter(l => l.j >= hist[0].j && l.j <= jAuj), A, B, rateB, fenetre: W, sAuj, jAuj, taux };
+}
