@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, remove, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles } from "./prevision.js";
+import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock } from "./prevision.js";
 import { TYPES, libelleSoin, echeance, joursAvant } from "./soins.js";
 
 const app = initializeApp(firebaseConfig);
@@ -434,6 +434,68 @@ const total = t => Math.round(t.reduce((s, x) => s + (x || 0), 0));
 const evolution = (a, b) => a && b ? Math.round((a - b) / b * 100) : null;
 const chiffre = (v, l, c = "") => `<div><b class="${c}">${v}</b><span>${l}</span></div>`;
 
+const MOIS_C = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+S.hist = 365;
+function courbe() {
+  const auj = aujourdhui(), c = courbeStock(S.foyer, auj); if (!c) return "";
+  const W = 340, H = 196, gauche = 30, droite = 10, haut = 14, bas = 24, hh = H - haut - bas;
+  const ruptures = [c.A?.rupture, c.B?.rupture].filter(Boolean);
+  const proche = !c.A && !c.B ? 60 : Math.min(365, Math.max(60, ...ruptures.map(r => r - c.jAuj + 25), ...(ruptures.length < [c.A, c.B].filter(Boolean).length ? [365] : [0])));
+  const jmin = S.hist ? Math.max(c.hist[0].j, c.jAuj - S.hist) : c.hist[0].j, jmax = c.jAuj + proche;
+  const vis = c.hist.filter(h => h.j >= jmin);
+  const maxVu = Math.max(1, ...vis.map(h => h.s), c.sAuj);
+  const pas = maxVu <= 12 ? 2 : maxVu <= 30 ? 5 : maxVu <= 60 ? 10 : maxVu <= 120 ? 20 : maxVu <= 300 ? 50 : 100, ymax = Math.ceil(maxVu * 1.08 / pas) * pas;
+  const X = j => gauche + (j - jmin) / (jmax - jmin) * (W - gauche - droite), Y = v => haut + hh - Math.min(v, ymax) / ymax * hh;
+  const chemin = pts => pts.map((q, i) => `${i ? "L" : "M"}${X(q.j).toFixed(1)} ${Y(q.s).toFixed(1)}`).join("");
+  let svg = "";
+  for (let v = 0; v <= ymax; v += pas) svg += `<line x1="${gauche}" x2="${W - droite}" y1="${Y(v)}" y2="${Y(v)}" class="grille"/><text class="axe" x="${gauche - 5}" y="${Y(v) + 3.500}" text-anchor="end">${v}</text>`;
+  // repères de mois
+  const d0 = new Date(jmin * 864e5), nbMois = Math.round((jmax - jmin) / 30.400), cadence = Math.max(1, Math.ceil(nbMois / 6));
+  let k = 0;
+  for (let y = d0.getUTCFullYear(), m = d0.getUTCMonth() + (d0.getUTCDate() > 1 ? 1 : 0); ; m++, k++) {
+    const j = Math.floor(Date.UTC(y, m, 1) / 864e5); if (j > jmax) break;
+    if (j < jmin) continue;
+    const mm = ((m % 12) + 12) % 12, an = new Date(j * 864e5).getUTCFullYear();
+    svg += `<line x1="${X(j)}" x2="${X(j)}" y1="${haut + hh}" y2="${haut + hh + 4}" class="grille"/>`;
+    if (k % cadence === 0) svg += `<text class="axe" x="${X(j)}" y="${H - 6}" text-anchor="middle">${MOIS_C[mm]}${mm === 0 || k === 0 ? " " + String(an).slice(2) : ""}</text>`;
+  }
+  svg += `<path d="${chemin(vis)}L${X(c.jAuj).toFixed(1)} ${Y(0)}L${X(vis[0].j).toFixed(1)} ${Y(0)}Z" class="cv-aire"/>`;
+  svg += `<line x1="${X(c.jAuj)}" x2="${X(c.jAuj)}" y1="${haut}" y2="${haut + hh}" class="cv-auj"/><text class="axe" x="${X(c.jAuj) + 4}" y="${haut + 8}">auj.</text>`;
+  if (c.A) svg += `<path d="${chemin(c.A.pts)}" class="cv-a"/>`;
+  if (c.B) svg += `<path d="${chemin(c.B.pts)}" class="cv-b"/>`;
+  svg += `<path d="${chemin(vis)}" class="cv-h"/>`;
+  c.livraisons.filter(l => l.j >= jmin).forEach(l => { const q = c.hist.find(h => h.j === l.j); if (q) svg += `<circle cx="${X(l.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="4" class="cv-liv"/>`; });
+  c.comp.filter(q => q.j >= jmin).forEach(q => { svg += `<circle cx="${X(q.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="2.800" class="cv-cpt"/>`; });
+  [[c.A, "cv-a-t", -9], [c.B, "cv-b-t", -21]].forEach(([pr, cl, dy]) => { if (!pr?.rupture) return; const x = X(pr.rupture), fin = x > W - 52; svg += `<circle cx="${x.toFixed(1)}" cy="${Y(0)}" r="4" class="cv-fin ${cl}"/><text class="val ${cl}" x="${(fin ? x + 4 : x).toFixed(1)}" y="${Y(0) + dy}" text-anchor="${fin ? "end" : "middle"}">${fr(enChaine(pr.rupture)).slice(0, 5)}</text>`; });
+  svg += `<line id="cvx" class="cv-croix" y1="${haut}" y2="${haut + hh}" x1="0" x2="0"/>`;
+  S.cv = { c, jmin, jmax, gauche, droite, W };
+  const dans = pr => pr?.rupture ? `rupture le <b>${fr(enChaine(pr.rupture))}</b> (dans ${pr.rupture - c.jAuj} j)` : `<b>pas de rupture</b> dans les 12 mois`;
+  const aT = j => { const q = c.A?.pts.find(x => x.j === c.jAuj + j) ; return q ? Math.round(q.s) : (c.A ? 0 : null); };
+  const lignes = [
+    c.A ? `<div class="cv-l"><i class="k a"></i><span>Années précédentes : ${dans(c.A)}</span></div>` : "",
+    c.B ? `<div class="cv-l"><i class="k b"></i><span>Consommation actuelle (${taux(c.rateB)} balle/j sur ${c.fenetre} j) : ${dans(c.B)}</span></div>` : "",
+    !c.A && !c.B ? `<p class="petit sobre">Les projections apparaissent après un 2e comptage ou quelques sorties notées.</p>` : `<p class="petit sobre">Projections sans nouvelle livraison.</p>`
+  ].join("");
+  const chip = (v, t) => `<button class="chip ${S.hist === v ? "actif" : ""}" data-a="histo" data-h="${v}">${t}</button>`;
+  return `<div class="carte cv-carte">${entete("Évolution du stock", `<div class="chips pet">${chip(180, "6 mois")}${chip(365, "1 an")}${chip(0, "Tout")}</div>`)}
+    <svg viewBox="0 0 ${W} ${H}" class="courbe" role="img" aria-label="Évolution du stock de foin en balles, avec projections">${svg}</svg>
+    <div class="tip" id="cvtip" hidden></div>
+    <div class="legende"><span><i class="l h"></i>Stock</span><span><i class="l a"></i>Années préc.</span><span><i class="l b"></i>Conso actuelle</span><span><i class="pt liv"></i>Livraison</span><span><i class="pt cpt"></i>Comptage</span></div>
+    <div class="cv-res">${lignes}</div></div>`;
+}
+document.addEventListener("pointermove", e => {
+  const sv = e.target.closest?.(".courbe"), tip = $("#cvtip"); if (!sv || !S.cv || !tip) return;
+  const { c, jmin, jmax, gauche, droite, W } = S.cv, r = sv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W;
+  const j = Math.round(jmin + (x - gauche) / (W - gauche - droite) * (jmax - jmin)); if (j < jmin || j > jmax) return;
+  const h = c.hist.find(q => q.j === j), a = c.A?.pts.find(q => q.j === j), b = c.B?.pts.find(q => q.j === j);
+  const ap = j > c.jAuj && c.A && !a ? 0 : a?.s, bp = j > c.jAuj && c.B && !b ? 0 : b?.s;
+  const cr = $("#cvx"); cr.setAttribute("x1", gauche + (j - jmin) / (jmax - jmin) * (W - gauche - droite)); cr.setAttribute("x2", cr.getAttribute("x1")); cr.style.display = "block";
+  const v = n => `${Math.round(n * 10) / 10}`.replace(".", ",");
+  tip.innerHTML = `<b>${frCourt(enChaine(j))} ${enChaine(j).slice(0, 4)}</b>` + (h ? `<div>Stock : ${v(h.s)} balles</div>` : "") + (ap != null && j >= c.jAuj ? `<div><i class="k a"></i>Années préc. : ${v(ap)}</div>` : "") + (bp != null && j >= c.jAuj ? `<div><i class="k b"></i>Conso actuelle : ${v(bp)}</div>` : "");
+  tip.hidden = false; const pc = (e.clientX - r.left) / r.width; tip.style.left = `${Math.min(Math.max(pc * 100, 22), 78)}%`;
+});
+document.addEventListener("pointerleave", e => { if (e.target.closest?.(".courbe")) { $("#cvtip")?.setAttribute("hidden", ""); { const x = $("#cvx"); if (x) x.style.display = "none"; } } }, true);
+
 function graphique() {
   const m = consoMensuelle(S.foyer), an = S.annee, sel = serie(m, an), prev = serie(m, an - 1);
   const max = Math.max(1, ...sel.filter(x => x != null), ...prev.filter(x => x != null)), tS = total(sel), tP = total(prev), d = evolution(tS, tP);
@@ -469,7 +531,7 @@ function foin() {
     gauche: bulle(a === "livraison" ? "blé" : "sapin", "or"), a, id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`,
     sous: [x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
   })).join("");
-  return graphique() + budget() +
+  return courbe() + graphique() + budget() +
     `<div class="carte">${entete("Comptages du foin", bouton("reglage", "params", "", "Seuil d'alerte") + bouton("plus", "inventaire", "", "Nouveau comptage"))}
       ${cs.length ? cs.map(c => { const p = per[c.id]; return rangee({
         gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
@@ -718,6 +780,7 @@ const actions = {
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([ics], { type: "text/calendar" })); a.download = "ecurie-soins.ics"; document.body.append(a); a.click(); a.remove();
     toast(`${ev.length} échéances exportées`);
   },
+  histo: (_id, d) => { S.hist = +d.h; rendre(); },
   copier: () => navigator.clipboard?.writeText(S.foyer.code).then(() => toast("Code copié")),
   sortie: () => {
     try { Object.keys(localStorage).filter(k => k.startsWith("ecurie-fid-") || k.startsWith("ecurie-foyer-")).forEach(k => localStorage.removeItem(k)); } catch { /* rien */ }
