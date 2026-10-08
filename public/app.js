@@ -92,9 +92,24 @@ function modif(chg, texte, type = "modif") {
   vite(update(ref(db, `foyers/${S.fid}`), m));
   return cle;
 }
-function annulerEntree(id) {
-  const e = S.foyer.journal?.[id]; if (!e?.annul || e.annule) return;
-  const m = {}; Object.values(e.annul).forEach(a => { m[a.c] = a.v ?? null; });
+// Actions faites avant la mise à jour : on retrouve la donnée créée grâce à l'heure d'enregistrement
+function reconstruire(e) {
+  if (e.annul || e.annule || !e.ts) return null;
+  const proche = t => Math.abs((+t || 0) - e.ts) < 5000;
+  if (e.type === "sortie") { const x = liste(S.foyer.foin?.sorties).find(x => proche(x.ts)); return x ? { liste: [{ c: `foin/sorties/${x.id}` }] } : null; }
+  if (e.type === "comptage") { const x = liste(S.foyer.foin?.inventaires).find(x => proche(x.ts)); return x ? { liste: [{ c: `foin/inventaires/${x.id}` }] } : null; }
+  if (e.type === "soin") {
+    for (const so of liste(S.foyer.soins)) {
+      const ps = liste(so.passages), p = ps.find(p => proche(p.ts)); if (!p) continue;
+      const def = ps.filter(q => q.id !== p.id && q.date).map(q => q.date).sort().pop() || "";
+      return { soin: so.id, def, liste: [{ c: `soins/${so.id}/passages/${p.id}` }] };
+    }
+  }
+  return null;
+}
+function annulerEntree(id, liste_ = null) {
+  const e = S.foyer.journal?.[id], l = liste_ || (e?.annul ? Object.values(e.annul) : null); if (!e || e.annule || !l) return;
+  const m = {}; l.forEach(a => { m[a.c] = a.v ?? null; });
   m[`journal/${id}/annule`] = true;
   modif(m, `a annulé : ${e.texte}`, "annulation");
   vibre();
@@ -345,7 +360,7 @@ const heure = ts => new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", 
 const journalListe = () => liste(S.foyer.journal).filter(j => j.ts).sort((x, y) => y.ts - x.ts);
 const ligneJournal = (j, avecBouton = false) => rangee({ gauche: avatar(j.qui), classe: j.annule ? "annule" : "",
   titre: `<b>${esc(j.qui)}</b> ${esc(j.texte)}`, sous: `${heure(j.ts)} · <span class="doux-i">${ic(ICONE_JOURNAL[j.type] || "check")}</span>${j.annule ? " · annulé" : ""}`,
-  droite: avecBouton && j.annul && !j.annule ? `<button class="btn sec petit-b" data-a="defaire" data-id="${j.id}">${j.type === "annulation" ? "Rétablir" : "Annuler"}</button>` : "" });
+  droite: avecBouton && !j.annule && (j.annul || reconstruire(j)) ? `<button class="btn sec petit-b" data-a="defaire" data-id="${j.id}">${j.type === "annulation" ? "Rétablir" : "Annuler"}</button>` : "" });
 function jourLibelle(ts) {
   const d = new Date(ts), n = new Date(), hier = new Date(Date.now() - 864e5), meme = (x, y) => x.toDateString() === y.toDateString();
   return meme(d, n) ? "Aujourd'hui" : meme(d, hier) ? "Hier" : d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
@@ -787,8 +802,10 @@ const actions = {
   },
   defaire(id) {
     const e = S.foyer.journal?.[id]; if (!e) return;
-    ouvrir(e.type === "annulation" ? "Rétablir" : "Annuler cette action", `<p><b>${esc(e.qui)}</b> ${esc(e.texte)}</p><p class="petit">Les données reviennent à ce qu'elles étaient avant cette action. Si elles ont été modifiées depuis, ces modifications seront remplacées. Tu pourras annuler cette annulation.</p>`,
-      () => annulerEntree(id), null, [], e.type === "annulation" ? "Rétablir" : "Annuler l'action");
+    const rec = reconstruire(e);
+    ouvrir(e.type === "annulation" ? "Rétablir" : "Annuler cette action", `<p><b>${esc(e.qui)}</b> ${esc(e.texte)}</p><p class="petit">Les données reviennent à ce qu'elles étaient avant cette action. Si elles ont été modifiées depuis, ces modifications seront remplacées. Tu pourras annuler cette annulation.</p>` +
+      (rec?.soin ? champ("pd", "Date du soin précédent (laisser vide s'il n'y en avait pas)", rec.def, "date") : ""),
+      () => { if (rec?.soin) rec.liste.push({ c: `soins/${rec.soin}/dernier`, v: val("pd") || "" }); annulerEntree(id, rec?.liste); }, null, [], e.type === "annulation" ? "Rétablir" : "Annuler l'action");
   },
   histo: (_id, d) => { S.hist = +d.h; rendre(); },
   copier: () => navigator.clipboard?.writeText(S.foyer.code).then(() => toast("Code copié")),
