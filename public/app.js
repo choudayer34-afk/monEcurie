@@ -83,10 +83,21 @@ const ecrireLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* s
 const vite = p => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, 1200))]); // ne bloque pas l'écran hors réseau
 const vibre = () => navigator.vibrate?.(12);
 const qui = () => S.foyer?.membres?.[S.user.uid]?.nom || (S.user.email.split("@")[0].replace(/^./, c => c.toUpperCase()));
-function journaliser(texte, type) {
-  const r = push(base("journal"));
-  vite(set(r, { ts: Date.now(), uid: S.user.uid, qui: qui(), texte, type }));
-  return r;
+/* Toute modification passe par modif() : elle garde l'état d'avant dans l'activité, ce qui permet de l'annuler (et d'annuler l'annulation). */
+const valeurDe = chemin => chemin.split("/").reduce((o, k) => (o == null ? o : o[k]), S.foyer) ?? null;
+function modif(chg, texte, type = "modif") {
+  const cle = push(base("journal")).key, annul = Object.keys(chg).map(c => { const v = valeurDe(c); return v === null ? { c } : { c, v }; });
+  const m = { ...chg, [`journal/${cle}`]: { ts: Date.now(), uid: S.user.uid, qui: qui(), texte, type, annul } };
+  liste(S.foyer.journal).filter(j => j.ts).sort((x, y) => y.ts - x.ts).slice(149).forEach(j => { m[`journal/${j.id}`] = null; });
+  vite(update(ref(db, `foyers/${S.fid}`), m));
+  return cle;
+}
+function annulerEntree(id) {
+  const e = S.foyer.journal?.[id]; if (!e?.annul || e.annule) return;
+  const m = {}; Object.values(e.annul).forEach(a => { m[a.c] = a.v ?? null; });
+  m[`journal/${id}/annule`] = true;
+  modif(m, `a annulé : ${e.texte}`, "annulation");
+  vibre();
 }
 const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
@@ -329,27 +340,30 @@ function accueil() {
 }
 
 /* --- Activité de la famille --- */
-const ICONE_JOURNAL = { sortie: "blé", soin: "croix", livraison: "blé", comptage: "check", cheval: "fer", copeaux: "sapin" };
+const ICONE_JOURNAL = { modif: "crayon", annulation: "retour", sortie: "blé", soin: "croix", livraison: "blé", comptage: "check", cheval: "fer", copeaux: "sapin" };
 const heure = ts => new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 const journalListe = () => liste(S.foyer.journal).filter(j => j.ts).sort((x, y) => y.ts - x.ts);
-const ligneJournal = j => rangee({ gauche: avatar(j.qui), titre: `<b>${esc(j.qui)}</b> ${esc(j.texte)}`, sous: `${heure(j.ts)} · <span class="doux-i">${ic(ICONE_JOURNAL[j.type] || "check")}</span>` });
+const ligneJournal = (j, avecBouton = false) => rangee({ gauche: avatar(j.qui), classe: j.annule ? "annule" : "",
+  titre: `<b>${esc(j.qui)}</b> ${esc(j.texte)}`, sous: `${heure(j.ts)} · <span class="doux-i">${ic(ICONE_JOURNAL[j.type] || "check")}</span>${j.annule ? " · annulé" : ""}`,
+  droite: avecBouton && j.annul && !j.annule ? `<button class="btn sec petit-b" data-a="defaire" data-id="${j.id}">${j.type === "annulation" ? "Rétablir" : "Annuler"}</button>` : "" });
 function jourLibelle(ts) {
   const d = new Date(ts), n = new Date(), hier = new Date(Date.now() - 864e5), meme = (x, y) => x.toDateString() === y.toDateString();
   return meme(d, n) ? "Aujourd'hui" : meme(d, hier) ? "Hier" : d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 }
 function activiteRecente() {
   const l = journalListe().slice(0, 4); if (!l.length) return "";
-  return `<div class="carte">${entete("Activité récente", bouton("droite", "vue", 'data-v="journal"', "Toute l'activité"))}${l.map(ligneJournal).join("")}</div>`;
+  return `<div class="carte">${entete("Activité récente", bouton("droite", "vue", 'data-v="journal"', "Toute l'activité"))}${l.map(j => ligneJournal(j)).join("")}</div>`;
 }
 function journal() {
   const l = journalListe().slice(0, 150);
   let html = `<div class="chips"><button class="chip" data-a="vue" data-v="accueil">${ic("gauche")} Accueil</button></div>`;
   if (!l.length) return html + vide("check", "Rien pour l'instant. Les retraits de balles, soins et livraisons notés par la famille apparaîtront ici.");
+  html += `<p class="petit astuce">Chaque action peut être annulée ici. Une annulation peut elle-même être rétablie.</p>`;
   let dernier = "", ouvert = false;
   for (const j of l) {
     const lib = jourLibelle(j.ts);
     if (lib !== dernier) { if (ouvert) html += `</div>`; html += `<h3 class="groupe">${lib}</h3><div class="carte liste">`; dernier = lib; ouvert = true; }
-    html += ligneJournal(j);
+    html += ligneJournal(j, true);
   }
   return html + `</div>`;
 }
@@ -566,6 +580,7 @@ function reglages() {
     <div class="carte">${entete("Membres", bouton("crayon", "prenom", "", "Modifier mon prénom"))}${m.map(x => rangee({ gauche: avatar(x.nom || x.email), titre: esc(x.nom || x.email), sous: x.nom ? esc(x.email) : "" })).join("")}</div>
     ${S.install ? `<button class="btn plein" data-a="installer">${ic("plus")} Installer l'application</button>` : ""}
     ${ios ? `<div class="carte petit">Sur iPhone : touche le bouton Partager, puis « Sur l'écran d'accueil » pour installer l'application.</div>` : ""}
+    <button class="btn sec plein" data-a="vue" data-v="journal">${ic("retour")} Activité et annulations</button>
     ${estAdmin() ? `<button class="btn sec plein" data-a="vue" data-v="admin">${ic("fer")} Administration</button>` : ""}
     <button class="btn sec plein" data-a="intro">Revoir la présentation</button>
     <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>`;
@@ -582,11 +597,11 @@ const qte = (id, lib, v = "", chips = []) => `<label for="${id}">${lib}</label>
   <input id="${id}" type="text" inputmode="decimal" value="${esc(v)}" placeholder="0"><button type="button" class="ib" data-a="pas" data-c="${id}" data-p="1" aria-label="Plus">+</button></div>
   ${chips.length ? `<div class="chips pet">${chips.map(q => `<button type="button" class="chip" data-a="chip" data-c="${id}" data-q="${q}">${q}</button>`).join("")}</div>` : ""}`;
 
-function ouvrir(titre, corps, onOk, onSup, requis = []) {
+function ouvrir(titre, corps, onOk, onSup, requis = [], libOk = "Enregistrer") {
   const d = $("#dlg");
   d.innerHTML = `<div class="poignee"></div><div class="entete"><h2>${titre}</h2><button class="ib" id="ann" aria-label="Fermer">${ic("fermer")}</button></div>
     <div class="formulaire">${corps}</div>
-    <div class="barre">${onSup ? `<button class="btn danger-t" id="sup">Supprimer</button>` : ""}<button class="btn plein" id="ok">Enregistrer</button></div>`;
+    <div class="barre">${onSup ? `<button class="btn danger-t" id="sup">Supprimer</button>` : ""}<button class="btn plein" id="ok">${libOk}</button></div>`;
   $("#ann").onclick = () => d.close();
   $("#ok").onclick = async () => {
     for (const r of requis) if (!val(r)) { const e = $("#" + r); e.classList.add("invalide"); e.focus(); return; }
@@ -629,9 +644,8 @@ const options = (liste_, sel, lib = x => esc(x.nom)) => liste_.map(c => `<option
 function noterSortie(q, date = ajd(), texte) {
   if (!(q > 0)) return;
   vibre();
-  const r = push(base("foin/sorties")), j = journaliser(texte || `a retiré ${balles(q)}`, "sortie");
-  vite(set(r, { date, balles: q, ts: Date.now() }));
-  toast(`− ${balles(q)} noté`, () => { remove(r); remove(j); });
+  const cle = modif({ [`foin/sorties/${push(base("foin/sorties")).key}`]: { date, balles: q, ts: Date.now() } }, texte || `a retiré ${balles(q)}`, "sortie");
+  toast(`− ${balles(q)} noté`, () => annulerEntree(cle));
 }
 
 /* ---------- Actions ---------- */
@@ -649,8 +663,8 @@ const actions = {
       champ("si", "N° SIRE", c.sire, "text", 'autocapitalize="characters" autocomplete="off"') +
       `<label class="interrupteur"><input type="checkbox" id="ac" ${c.actif !== false ? "checked" : ""}><span class="rail"></span>Cheval actif</label>` +
       `<label for="no">Notes</label><textarea id="no" rows="3">${esc(c.notes)}</textarea>`,
-      () => (!id && journaliser(`a ajouté le cheval ${val("n")}`, "cheval"), set(id ? base(`chevaux/${id}`) : push(base("chevaux")), { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no"), photo })),
-      id && (() => update(ref(db, `foyers/${S.fid}`), Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(s => s.chevalId === id).map(s => [`soins/${s.id}`, null])]))), ["n"]);
+      () => { const k = id || push(base("chevaux")).key; modif({ [`chevaux/${k}`]: { nom: val("n"), sire: val("si").toUpperCase(), robe: val("r"), naissance: val("na"), actif: $("#ac").checked, notes: val("no"), photo } }, `a ${id ? "modifié" : "ajouté"} le cheval ${val("n")}`, "cheval"); },
+      id && (() => modif(Object.fromEntries([[`chevaux/${id}`, null], ...liste(S.foyer.soins).filter(x => x.chevalId === id).map(x => [`soins/${x.id}`, null])]), `a supprimé le cheval ${c.nom}`, "cheval")), ["n"]);
     $("#ph").onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
       try { photo = await reduire(f); $("#phApercu").innerHTML = avatarC({ nom: val("n") || c.nom, photo }, "grand"); } catch { toast("Photo illisible"); }
@@ -663,8 +677,8 @@ const actions = {
       champ("n", "Nom", c.nom) + `<label>Rôle</label>` + pills("ro", Object.keys(ICONE_ROLE).map(r => [r, r.replace("Fournisseur de foin", "Foin").replace("Maréchal-ferrant", "Maréchal"), ICONE_ROLE[r]]), c.role || "Autre") +
       `<div class="duo">${champ("t", "Téléphone", c.tel, "tel", 'inputmode="tel"')}${champ("e", "E-mail", c.email, "email", 'inputmode="email"')}</div>` +
       champ("ad", "Adresse", c.adresse, "text", 'autocomplete="street-address"') + `<label for="no">Notes</label><textarea id="no" rows="2">${esc(c.notes)}</textarea>`,
-      () => set(id ? base(`contacts/${id}`) : push(base("contacts")), { nom: val("n"), role: radio("ro"), tel: val("t"), email: val("e"), adresse: val("ad"), notes: val("no") }),
-      id && (() => remove(base(`contacts/${id}`))), ["n"]);
+      () => { modif({ [`contacts/${id || push(base("contacts")).key}`]: { nom: val("n"), role: radio("ro"), tel: val("t"), email: val("e"), adresse: val("ad"), notes: val("no") } }, `a ${id ? "modifié" : "ajouté"} le contact ${val("n")}`, "contact"); },
+      id && (() => modif({ [`contacts/${id}`]: null }, `a supprimé le contact ${c.nom}`, "contact")), ["n"]);
   },
   livraison(id) {
     const l = id ? S.foyer.foin.livraisons[id] : { date: ajd() };
@@ -672,8 +686,8 @@ const actions = {
       champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
       champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle || "", "number", 'min="0" step="0.5" inputmode="decimal"') + prixChamps(l) +
       `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
-      () => (!id && journaliser(`a noté une livraison de ${balles(parseQte(val("b")))}`, "livraison"), set(id ? base(`foin/livraisons/${id}`) : push(base("foin/livraisons")), { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") })),
-      id && (() => remove(base(`foin/livraisons/${id}`))), ["d", "b"]);
+      () => { modif({ [`foin/livraisons/${id || push(base("foin/livraisons")).key}`]: { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") } }, `a ${id ? "modifié" : "noté"} une livraison de ${balles(parseQte(val("b")))}`, "livraison"); },
+      id && (() => modif({ [`foin/livraisons/${id}`]: null }, `a supprimé la livraison de ${balles(+l.balles || 0)} (${frCourt(l.date)})`, "livraison")), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
   livraisonCopeaux(id) {
@@ -681,8 +695,8 @@ const actions = {
     ouvrir(id ? "Modifier la livraison" : "Livraison de copeaux",
       champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) + prixChamps(l) +
       `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
-      () => (!id && journaliser(`a noté une livraison de ${balles(parseQte(val("b")))} de copeaux`, "copeaux"), set(id ? base(`copeaux/livraisons/${id}`) : push(base("copeaux/livraisons")), { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") })),
-      id && (() => remove(base(`copeaux/livraisons/${id}`))), ["d", "b"]);
+      () => { modif({ [`copeaux/livraisons/${id || push(base("copeaux/livraisons")).key}`]: { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") } }, `a ${id ? "modifié" : "noté"} une livraison de ${balles(parseQte(val("b")))} de copeaux`, "copeaux"); },
+      id && (() => modif({ [`copeaux/livraisons/${id}`]: null }, `a supprimé la livraison de ${balles(+l.balles || 0)} de copeaux (${frCourt(l.date)})`, "copeaux")), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
   retirer(_id, d) {
@@ -693,8 +707,8 @@ const actions = {
   sortieEdit(id) {
     const x = S.foyer.foin?.sorties?.[id]; if (!x) return;
     ouvrir("Corriger la sortie", qte("b", "Quantité retirée (balles)", fmtQte(+x.balles || 0), ["1/4", "1/3", "1/2", "2/3", "1", "2"]) + champ("d", "Date", x.date, "date"),
-      () => (parseQte(val("b")) > 0 ? update(base(`foin/sorties/${id}`), { balles: parseQte(val("b")), date: val("d") || x.date }) : Promise.resolve()),
-      () => { journaliser(`a supprimé une sortie de ${balles(+x.balles || 0)} (${frCourt(x.date)})`, "sortie"); return remove(base(`foin/sorties/${id}`)); }, ["b"]);
+      () => { if (parseQte(val("b")) > 0) modif({ [`foin/sorties/${id}`]: { ...x, id: undefined, balles: parseQte(val("b")), date: val("d") || x.date } }, `a corrigé une sortie : ${balles(parseQte(val("b")))} (${frCourt(val("d") || x.date)})`, "sortie"); },
+      () => { modif({ [`foin/sorties/${id}`]: null }, `a supprimé une sortie de ${balles(+x.balles || 0)} (${frCourt(x.date)})`, "sortie"); }, ["b"]);
   },
   finirBalle() {
     const p = prevision(S.foyer, aujourdhui()); if (!p) return;
@@ -707,11 +721,10 @@ const actions = {
   filtre: (_id, d) => { S.filtre = d.f; rendre(); },
   annee: (_id, d) => { S.annee += +d.d; rendre(); },
   soinFait(id) {
-    const s = S.foyer.soins[id], jr = ajd(), avant = s.dernier || "", r = push(base(`soins/${id}/passages`));
+    const s = S.foyer.soins[id], jr = ajd();
     vibre();
-    const j = journaliser(`a noté ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin");
-    vite(update(base(`soins/${id}`), { dernier: jr })); vite(set(r, { date: jr, ts: Date.now() }));
-    toast(`${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, () => { update(base(`soins/${id}`), { dernier: avant }); remove(r); remove(j); });
+    const cle = modif({ [`soins/${id}/dernier`]: jr, [`soins/${id}/passages/${push(base(`soins/${id}/passages`)).key}`]: { date: jr, ts: Date.now() } }, `a noté ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin");
+    toast(`${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, () => annulerEntree(cle));
   },
   soin(id, d) {
     const chev = liste(S.foyer.chevaux).filter(c => c.actif !== false || c.id === S.foyer.soins?.[id]?.chevalId).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
@@ -725,45 +738,36 @@ const actions = {
       `<label for="co">Intervenant</label><select id="co"><option value="">—</option>${options(liste(S.foyer.contacts), s.contactId, c => `${esc(c.nom)} (${esc(c.role || "")})`)}</select>` + champ("no", "Note", s.note),
       async () => {
         const o = { type: radio("ty"), libelle: val("li"), n: +val("pn") || 1, unite: val("pu"), dernier: val("de"), premiere: val("pr"), contactId: val("co"), note: val("no") };
-        if (id) return update(base(`soins/${id}`), { ...o, chevalId: val("ch") });
+        const lib = x => `${libelleSoin(o)} · ${nomCheval(x)}`;
+        if (id) { modif(Object.fromEntries(Object.entries({ ...o, chevalId: val("ch") }).map(([k, v]) => [`soins/${id}/${k}`, v])), `a modifié ${lib(val("ch"))}`, "soin"); return; }
         const cibles = val("ch") === "*" ? chev.filter(c => c.actif !== false).map(c => c.id) : [val("ch")];
-        for (const cid of cibles) await set(push(base("soins")), { ...o, chevalId: cid });
+        modif(Object.fromEntries(cibles.map(cid => [`soins/${push(base("soins")).key}`, { ...o, chevalId: cid }])), cibles.length > 1 ? `a ajouté ${libelleSoin(o)} pour ${cibles.length} chevaux` : `a ajouté ${lib(cibles[0])}`, "soin");
       },
-      id && (() => remove(base(`soins/${id}`))));
+      id && (() => modif({ [`soins/${id}`]: null }, `a supprimé ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin")));
     document.querySelectorAll("input[name=ty]").forEach(r => r.onchange = () => { if (!id) { const t = TYPES[radio("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; } });
   },
   inventaire(id) {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
     ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; if (!id) journaliser(`a compté ${balles(o.balles)} en stock`, "comptage"); return set(id ? base(chemin) : push(base("foin/inventaires")), o); },
-      id && (() => remove(base(chemin))), ["d", "b"]);
+      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; modif({ [id ? chemin : `foin/inventaires/${push(base("foin/inventaires")).key}`]: o }, `a ${id ? "modifié le comptage :" : "compté"} ${balles(o.balles)} en stock`, "comptage"); },
+      id && (() => modif({ [chemin]: null }, `a supprimé le comptage de ${balles(+i.balles || 0)} (${frCourt(i.date)})`, "comptage")), ["d", "b"]);
   },
   inventaireCopeaux() {
     const i = S.foyer.copeaux?.inventaire || { date: ajd() };
     ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => (journaliser(`a compté ${balles(parseQte(val("b")))} de copeaux`, "copeaux"), set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) })), null, ["b"]);
+      () => { modif({ "copeaux/inventaire": { date: val("d"), balles: parseQte(val("b")) } }, `a compté ${balles(parseQte(val("b")))} de copeaux`, "copeaux"); }, null, ["b"]);
   },
   params() {
     const f = S.foyer.foin || {};
     ouvrir("Réglages du stock", `<p class="petit">L'accueil passe en alerte quand il reste moins de jours de foin que le seuil. La commande conseillée vise à couvrir la période choisie.</p>` +
       champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"') +
       champ("cv", "Période à couvrir par une commande (jours)", f.couvertureJours || 90, "number", 'min="7" inputmode="numeric"'),
-      () => update(base("foin"), { seuilJours: +val("s") || 14, couvertureJours: +val("cv") || 90 }));
-  },
-  inventaireCopeaux() {
-    const i = S.foyer.copeaux?.inventaire || { date: ajd() };
-    ouvrir("Comptage des copeaux", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => (journaliser(`a compté ${balles(parseQte(val("b")))} de copeaux`, "copeaux"), set(base("copeaux/inventaire"), { date: val("d"), balles: parseQte(val("b")) })), null, ["b"]);
-  },
-  params() {
-    const f = S.foyer.foin || {};
-    ouvrir("Seuil d'alerte", `<p class="petit">L'accueil passe en alerte quand il reste moins de ce nombre de jours de foin.</p>` + champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"'),
-      () => update(base("foin"), { seuilJours: +val("s") || 14 }));
+      () => { modif({ "foin/seuilJours": +val("s") || 14, "foin/couvertureJours": +val("cv") || 90 }, "a modifié les réglages du stock", "modif"); });
   },
   prenom() {
     ouvrir("Mon prénom", `<p class="petit">Affiché dans l'activité de la famille.</p>` + champ("pr", "Prénom", S.foyer.membres?.[S.user.uid]?.nom || "", "text", 'autocomplete="given-name"'),
-      () => update(base(`membres/${S.user.uid}`), { nom: val("pr") }), null, ["pr"]);
+      () => { modif({ [`membres/${S.user.uid}/nom`]: val("pr") }, "a changé son prénom", "modif"); }, null, ["pr"]);
   },
   res: (id, d) => { $("#drech").close(); actions[d.t](id); },
   intro: () => intro(),
@@ -780,6 +784,11 @@ const actions = {
     const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Ecurie//FR", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Écurie", ...ev, "END:VCALENDAR"].join("\r\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([ics], { type: "text/calendar" })); a.download = "ecurie-soins.ics"; document.body.append(a); a.click(); a.remove();
     toast(`${ev.length} échéances exportées`);
+  },
+  defaire(id) {
+    const e = S.foyer.journal?.[id]; if (!e) return;
+    ouvrir(e.type === "annulation" ? "Rétablir" : "Annuler cette action", `<p><b>${esc(e.qui)}</b> ${esc(e.texte)}</p><p class="petit">Les données reviennent à ce qu'elles étaient avant cette action. Si elles ont été modifiées depuis, ces modifications seront remplacées. Tu pourras annuler cette annulation.</p>`,
+      () => annulerEntree(id), null, [], e.type === "annulation" ? "Rétablir" : "Annuler l'action");
   },
   histo: (_id, d) => { S.hist = +d.h; rendre(); },
   copier: () => navigator.clipboard?.writeText(S.foyer.code).then(() => toast("Code copié")),
