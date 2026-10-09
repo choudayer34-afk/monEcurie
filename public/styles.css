@@ -358,3 +358,14 @@ nav .lib{font-size:.66rem;font-weight:600;line-height:1}
 .segment{display:flex;gap:4px;padding:4px;margin-bottom:12px;background:var(--bg2);border-radius:16px}
 .segment button{flex:1;min-height:40px;border:0;border-radius:12px;background:none;color:var(--doux);font-weight:700;font-size:.95rem}
 .segment button.actif{background:var(--carte);color:var(--txt);box-shadow:0 1px 4px #0002}
+
+.sync{width:30px;height:42px;border:0;background:none;display:flex;align-items:center;justify-content:center;flex:none;padding:0}
+.sync[hidden]{display:none}
+.sync i{width:12px;height:12px;border-radius:50%;background:#7fe0a0;box-shadow:0 0 0 3px #ffffff30}
+.sync.envoi i{background:#ffd166;animation:puls 1s infinite}
+.sync.hors i{background:#ff8a65}
+@keyframes puls{50%{opacity:.35}}
+.actions-soins{display:flex;flex-wrap:wrap;gap:8px}.actions-soins .btn{flex:1 1 30%;min-width:0;padding-inline:8px}
+.actions-soins .btn{white-space:nowrap;font-size:.9rem}.actions-soins .btn .ic{display:none}
+#foyerNom{max-width:32vw}
+.sync{width:20px}.h-droite{gap:6px}#foyerNom{max-width:28vw}

@@ -94,6 +94,23 @@ S.vuPrec = (() => { try { return +localStorage.getItem("ecurie-vu") || null; } c
 const ecrireLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } };
 if (!S.vuPrec) ecrireLocal("ecurie-vu", String(Date.now()));
 S.rapide = lire("ecurie-rapide") === "1";
+const sync = { attente: 0, derniere: null, enLigne: true };
+function textSync() {
+  const h = d => new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }), n = sync.attente;
+  if (!sync.enLigne) return n ? `Hors réseau : ${n} modification${n > 1 ? "s" : ""} à envoyer au retour du réseau` : "Hors réseau : tes modifications seront envoyées au retour du réseau";
+  return n ? "Envoi en cours…" : `À jour${sync.derniere ? ` (dernière synchronisation à ${h(sync.derniere)})` : ""}`;
+}
+function majSync() {
+  const e = $("#sync"); if (!e) return;
+  e.className = "sync " + (!sync.enLigne ? "hors" : sync.attente ? "envoi" : "ok");
+  e.title = e.ariaLabel = textSync();
+  if (!$("#hors").hidden) $("#hors").textContent = textSync();
+}
+function suivreEnvoi(p) {
+  sync.attente++; majSync();
+  Promise.resolve(p).catch(() => { /* échec signalé ailleurs */ }).finally(() => { sync.attente = Math.max(0, sync.attente - 1); if (!sync.attente && sync.enLigne) sync.derniere = Date.now(); majSync(); });
+  return vite(p);
+}
 const vite = p => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, 1200))]); // ne bloque pas l'écran hors réseau
 const vibre = () => navigator.vibrate?.(12);
 const qui = () => S.foyer?.membres?.[S.user.uid]?.nom || (S.user.email.split("@")[0].replace(/^./, c => c.toUpperCase()));
@@ -103,7 +120,7 @@ function modif(chg, texte, type = "modif") {
   const cle = push(base("journal")).key, annul = Object.keys(chg).map(c => { const v = valeurDe(c); return v === null ? { c } : { c, v }; });
   const m = { ...chg, [`journal/${cle}`]: { ts: Date.now(), uid: S.user.uid, qui: qui(), texte, type, annul } };
   liste(S.foyer.journal).filter(j => j.ts).sort((x, y) => y.ts - x.ts).slice(149).forEach(j => { m[`journal/${j.id}`] = null; });
-  vite(update(ref(db, `foyers/${S.fid}`), m));
+  suivreEnvoi(update(ref(db, `foyers/${S.fid}`), m));
   return cle;
 }
 // Actions faites avant la mise à jour : on retrouve la donnée créée grâce à l'heure d'enregistrement
@@ -133,7 +150,7 @@ const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "
 /* ---------- Authentification et foyer ---------- */
 let initFait = false, minuteurHors;
 function demarrer() {
-  $("#nav").hidden = false; $("#rech").hidden = false; $("#foyerNom").textContent = S.foyer.nom || "";
+  $("#nav").hidden = false; $("#rech").hidden = false; $("#sync").hidden = false; majSync(); $("#foyerNom").textContent = S.foyer.nom || "";
   rendre();
   if (initFait) return; initFait = true;
   const q = new URLSearchParams(location.search);
@@ -154,18 +171,19 @@ onAuthStateChanged(auth, async u => {
   S.fid = fid;
   const cache = lire(`ecurie-foyer-${fid}`);
   if (cache) { try { S.foyer = JSON.parse(cache); demarrer(); } catch { /* cache illisible */ } }
-  onValue(ref(db, `foyers/${fid}`), snap => { S.foyer = snap.val() || {}; ecrireLocal(`ecurie-foyer-${fid}`, JSON.stringify(S.foyer)); demarrer(); },
+  onValue(ref(db, `foyers/${fid}`), snap => { S.foyer = snap.val() || {}; sync.derniere = Date.now(); majSync(); ecrireLocal(`ecurie-foyer-${fid}`, JSON.stringify(S.foyer)); demarrer(); },
     () => { try { localStorage.removeItem(`ecurie-fid-${u.uid}`); } catch { /* rien */ } $("#vue").innerHTML = `<div class="carte alerte">Accès au foyer refusé.</div>`; });
   onValue(ref(db, ".info/connected"), s => {
     clearTimeout(minuteurHors);
-    if (s.val() === false) minuteurHors = setTimeout(() => { $("#hors").hidden = false; }, 3500); else $("#hors").hidden = true;
+    if (s.val() === false) minuteurHors = setTimeout(() => { sync.enLigne = false; $("#hors").hidden = false; majSync(); }, 3500);
+    else { if (!sync.enLigne && !sync.attente) sync.derniere = Date.now(); sync.enLigne = true; $("#hors").hidden = true; majSync(); }
   });
 });
 
 const accroche = (titre, sous) => `<div class="accueil-log"><div class="logo">${ic("fer")}</div><h2>${titre}</h2><p>${sous}</p></div>`;
 
 function ecranConnexion() {
-  $("#nav").hidden = true; $("#titre").textContent = "Écurie"; $("#sous").textContent = ""; $("#foyerNom").textContent = "";
+  $("#nav").hidden = true; $("#sync").hidden = true; $("#titre").textContent = "Écurie"; $("#sous").textContent = ""; $("#foyerNom").textContent = "";
   $("#vue").innerHTML = accroche("Bienvenue", "Foin, soins et rappels de l'écurie, partagés en famille.") + `<div class="carte">
     <label for="em">E-mail</label><input id="em" type="email" autocomplete="email" inputmode="email">
     <label for="mp">Mot de passe</label><input id="mp" type="password" autocomplete="current-password">
@@ -178,7 +196,7 @@ function ecranConnexion() {
 }
 
 function ecranFoyer() {
-  $("#nav").hidden = true; $("#titre").textContent = "Ton foyer"; $("#sous").textContent = "";
+  $("#nav").hidden = true; $("#sync").hidden = true; $("#titre").textContent = "Ton foyer"; $("#sous").textContent = "";
   $("#vue").innerHTML = accroche("Ton foyer", "Toute la famille partage les mêmes données.") + `<div class="carte"><h3>Créer le foyer</h3>
       <label for="fn">Nom du foyer</label><input id="fn" placeholder="Famille …"><button class="btn plein" id="cf">Créer</button></div>
     <div class="carte"><h3>Rejoindre un foyer</h3>
@@ -229,7 +247,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "36", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "37", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -469,7 +487,7 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return segSante("soins") + `<div class="chips passe">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return segSante("soins") + `<div class="chips passe">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button><button class="btn sec" data-a="faitGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("check")} Fait groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
@@ -1058,6 +1076,7 @@ const actions = {
   },
   pas: (_i, d) => { const e = $("#" + d.c); e.value = fmtQte(Math.max(0, parseQte(e.value) + +d.p)); e.dispatchEvent(new Event("input", { bubbles: true })); },
   chip: (_i, d) => { const e = $("#" + d.c); e.value = d.q; e.dispatchEvent(new Event("input", { bubbles: true })); },
+  etatSync: () => toast(textSync()),
   basculerRapide: () => { S.rapide = !S.rapide; ecrireLocal("ecurie-rapide", S.rapide ? "1" : "0"); rendre(); },
   aller: id => { if (id === "foin") S.article = null; S.vue = id; window.scrollTo(0, 0); rendre(); },
   vue: (_id, d) => { S.vue = d.v; window.scrollTo(0, 0); rendre(); },
@@ -1131,6 +1150,23 @@ const actions = {
         modif(tous, `a renseigné le carnet de ${S.foyer.chevaux[cid].nom} (${nb} soin${nb > 1 ? "s" : ""})`, "soin");
       }, null, [], "Enregistrer");
     $("#cc").onchange = () => { $("#cl").innerHTML = lignes(val("cc")); };
+  },
+  faitGroupe(_id, d) {
+    const type0 = d?.t || "ferrure";
+    const candidats = t => soinsPrevus().filter(s => s.type === t && S.foyer.chevaux[s.chevalId].actif !== false).sort((x, y) => S.foyer.chevaux[x.chevalId].nom.localeCompare(S.foyer.chevaux[y.chevalId].nom));
+    const lignes = t => { const l = candidats(t); return l.length ? `<div class="liste-coches">${l.map(s => `<label class="coche"><input type="checkbox" value="${s.id}" ${s.j === null || s.j <= 30 ? "checked" : ""}><span>${esc(libelleSoin(s))} · ${esc(S.foyer.chevaux[s.chevalId].nom)} <small>(${s.j === null ? "à planifier" : quand(s.j)})</small></span></label>`).join("")}</div>` : `<p class="petit sobre">Aucun soin de ce type à noter.</p>`; };
+    ouvrir("Noté fait pour plusieurs",
+      `<p class="petit">Un même passage pour plusieurs ${MOTS().pl.toLowerCase()} : choisis le type de soin, décoche ceux qui ne sont pas concernés, puis donne la date du passage.</p><label>Type de soin</label>${pills("ft", Object.entries(TYPES).map(([k, t]) => [k, t.nom, ICONE_SOIN[k]]), type0)}<label>Soins concernés</label><div id="fl">${lignes(type0)}</div>` +
+      champ("fd", "Date du passage", ajd(), "date"),
+      () => {
+        const ids = [...document.querySelectorAll("#fl input:checked")].map(x => x.value), date = val("fd");
+        if (!ids.length) throw Object.assign(new Error("vide"), { avis: "Aucun soin coché" });
+        const o = {};
+        ids.forEach(i => { o[`soins/${i}/dernier`] = date; if (S.foyer.soins[i].rdv) o[`soins/${i}/rdv`] = null; o[`soins/${i}/passages/${push(base(`soins/${i}/passages`)).key}`] = { date, ts: Date.now() }; });
+        vibre();
+        modif(o, `a noté ${TYPES[radio("ft")].nom.toLowerCase()} fait le ${frCourt(date)} pour ${ids.length} soin${ids.length > 1 ? "s" : ""}`, "soin");
+      }, null, ["fd"], "Noter fait");
+    document.querySelectorAll("input[name=ft]").forEach(r => r.onchange = () => { $("#fl").innerHTML = lignes(radio("ft")); });
   },
   rdvGroupe(_id, d) {
     const type0 = d?.t || "ferrure";
