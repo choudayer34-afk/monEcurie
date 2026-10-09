@@ -1,7 +1,7 @@
 // Rappels quotidiens : soins à prévoir et stocks bas, envoyés à chaque appareil à l'heure choisie.
 import { firebaseConfig } from "../public/firebase-config.js";
 import { jour, liste, prevision } from "../public/prevision.js";
-import { echeance, libelleSoin } from "../public/soins.js";
+import { prochaine, rdvActif, libelleSoin } from "../public/soins.js";
 import { suivi } from "../public/stocks.js";
 import { envoyer } from "./push.js";
 
@@ -40,17 +40,18 @@ const duree = j => (j <= 0 ? "stock épuisé d'après la prévision" : `environ 
 export function composer(f, n, auj) {
   const lignes = []; let soinsOk = false, stocksOk = false;
   if (n.soins !== false) {
-    const g = { 0: [], 7: [], retard: [] };
+    const g = { 0: [], 1: [], 7: [], retard: [] };
     liste(f.soins).forEach(s => {
       const c = f.chevaux?.[s.chevalId]; if (!c || c.actif === false) return;
       if (n.sansTypes?.[s.type] || n.sansAnimaux?.[s.chevalId]) return;
-      const ech = echeance(s); if (!ech) return;
-      const d = jour(ech) - auj, nom = `${libelleSoin(s)} · ${c.nom}`;
+      const ech = prochaine(s); if (!ech) return;
+      const rdv = rdvActif(s), d = jour(ech) - auj, nom = `${rdv ? "RDV " : ""}${libelleSoin(s)} · ${c.nom}`;
       if (d === 0 && n.rappelJour !== false) g[0].push(nom);
       else if (d === 7 && n.rappel7 !== false) g[7].push(nom);
+      else if (d === 1 && rdv && n.rappel7 !== false) g[1].push(nom);
       else if (d < 0 && (-d) % 3 === 0 && n.rappelRetard !== false) g.retard.push(`${nom} (${-d} j)`);
     });
-    [groupe("Aujourd'hui", g[0]), groupe("Dans 7 jours", g[7]), groupe("En retard", g.retard)].filter(Boolean).forEach(x => { lignes.push(x); soinsOk = true; });
+    [groupe("Aujourd'hui", g[0]), groupe("Demain", g[1]), groupe("Dans 7 jours", g[7]), groupe("En retard", g.retard)].filter(Boolean).forEach(x => { lignes.push(x); soinsOk = true; });
   }
   if (n.stocks !== false) {
     const p = prevision(f, auj);
