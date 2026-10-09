@@ -1,6 +1,6 @@
 // Rappels quotidiens : soins à prévoir et stocks bas, envoyés à chaque appareil à l'heure choisie.
 import { firebaseConfig } from "../public/firebase-config.js";
-import { jour, liste, prevision } from "../public/prevision.js";
+import { jour, enChaine, liste, prevision } from "../public/prevision.js";
 import { prochaine, rdvActif, libelleSoin } from "../public/soins.js";
 import { suivi } from "../public/stocks.js";
 import { envoyer } from "./push.js";
@@ -55,6 +55,8 @@ export function composer(f, n, auj) {
   }
   if (n.stocks !== false) {
     const p = prevision(f, auj);
+    const livJour = n.sansStocks?.foin ? [] : liste(f.foin?.livraisons).filter(l => l.date === enChaine(auj));
+    if (livJour.length) { lignes.push(`Livraison de foin prévue aujourd'hui : ${livJour.reduce((s, l) => s + (+l.balles || 0), 0)} balles`); stocksOk = true; }
     if (p && !n.sansStocks?.foin && alerteStock(p.jours, +f.foin?.seuilJours || 14, auj)) { lignes.push(`Foin : ${duree(p.jours)}, pense à commander`); stocksOk = true; }
     liste(f.stocks).filter(x => x.actif !== false && !n.sansStocks?.[x.id]).forEach(x => {
       const r = suivi(x, auj);
