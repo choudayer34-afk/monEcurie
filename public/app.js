@@ -226,7 +226,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "29", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "30", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -422,7 +422,7 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips">${chips}${tous.some(x => x.ech) ? `<button class="chip" data-a="agenda" title="Exporter vers l'agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return `<div class="chips">${chips}${tous.length ? `<button class="chip" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}" title="Fixer un rendez-vous pour plusieurs animaux">${ic("calendrier")} RDV groupé</button>` : ""}${tous.some(x => x.ech) ? `<button class="chip" data-a="agenda" title="Exporter vers l'agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
@@ -834,7 +834,7 @@ function ouvrir(titre, corps, onOk, onSup, requis = [], libOk = "Enregistrer") {
   $("#ok").onclick = async () => {
     for (const r of requis) if (!val(r)) { const e = $("#" + r); e.classList.add("invalide"); e.focus(); return; }
     $("#ok").disabled = true;
-    try { await vite(onOk()); d.close(); } catch { $("#ok").disabled = false; toast("Enregistrement impossible"); }
+    try { await vite(onOk()); d.close(); } catch (e) { $("#ok").disabled = false; toast(e?.avis || "Enregistrement impossible"); }
   };
   if (onSup) $("#sup").onclick = async () => {
     const b = $("#sup");
@@ -988,6 +988,21 @@ const actions = {
     };
     $("#pu").onchange = majPonctuel; majPonctuel();
     document.querySelectorAll("input[name=ty]").forEach(r => r.onchange = () => { if (!id) { const t = TYPES[radio("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; majPonctuel(); } });
+  },
+  rdvGroupe(_id, d) {
+    const type0 = d?.t || "ferrure";
+    const candidats = t => soinsPrevus().filter(s => s.type === t && S.foyer.chevaux[s.chevalId].actif !== false).sort((x, y) => S.foyer.chevaux[x.chevalId].nom.localeCompare(S.foyer.chevaux[y.chevalId].nom));
+    const lignes = t => { const l = candidats(t); return l.length ? `<div class="liste-coches">${l.map(s => `<label class="coche"><input type="checkbox" value="${s.id}" checked><span>${esc(libelleSoin(s))} · ${esc(S.foyer.chevaux[s.chevalId].nom)}${s.rdvOk ? ` (RDV déjà fixé le ${frCourt(s.ech)})` : ""}</span></label>`).join("")}</div>` : `<p class="petit sobre">Aucun soin de ce type à planifier.</p>`; };
+    ouvrir("Rendez-vous groupé",
+      `<p class="petit">Un même rendez-vous pour plusieurs ${MOTS().pl.toLowerCase()} : choisis le type de soin, décoche ceux qui ne sont pas concernés, puis donne la date.</p><label>Type de soin</label>${pills("rt", Object.entries(TYPES).map(([k, t]) => [k, t.nom, ICONE_SOIN[k]]), type0)}<label>Soins concernés</label><div id="rl">${lignes(type0)}</div>` +
+      champ("rd", "Date du rendez-vous", "", "date"),
+      () => {
+        const ids = [...document.querySelectorAll("#rl input:checked")].map(x => x.value), date = val("rd");
+        if (!ids.length) throw Object.assign(new Error("vide"), { avis: "Aucun soin coché" });
+        const o = Object.fromEntries(ids.map(i => [`soins/${i}/${ponctuel(S.foyer.soins[i]) ? "premiere" : "rdv"}`, date]));
+        modif(o, `a fixé un rendez-vous de ${TYPES[radio("rt")].nom.toLowerCase()} le ${frCourt(date)} pour ${ids.length} soin${ids.length > 1 ? "s" : ""}`, "soin");
+      }, null, ["rd"], "Fixer le rendez-vous");
+    document.querySelectorAll("input[name=rt]").forEach(r => r.onchange = () => { $("#rl").innerHTML = lignes(radio("rt")); });
   },
   inventaire(id) {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
