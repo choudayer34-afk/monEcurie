@@ -93,6 +93,7 @@ const lire = k => { try { return localStorage.getItem(k); } catch { return null;
 S.vuPrec = (() => { try { return +localStorage.getItem("ecurie-vu") || null; } catch { return null; } })();
 const ecrireLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } };
 if (!S.vuPrec) ecrireLocal("ecurie-vu", String(Date.now()));
+S.rapide = lire("ecurie-rapide") === "1";
 const vite = p => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, 1200))]); // ne bloque pas l'écran hors réseau
 const vibre = () => navigator.vibrate?.(12);
 const qui = () => S.foyer?.membres?.[S.user.uid]?.nom || (S.user.email.split("@")[0].replace(/^./, c => c.toUpperCase()));
@@ -228,7 +229,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "34", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "35", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -242,7 +243,7 @@ const SERVICES = [
 function admin() {
   const f = S.foyer, nb = o => liste(o).length, dern = liste(f.journal).reduce((m, j) => Math.max(m, j.ts || 0), 0);
   const lien = ([t, s, u]) => `<a class="rangee" href="${u}" target="_blank" rel="noopener"><div class="corps"><div class="titre">${t}</div><div class="petit">${s}</div></div><span class="chev">${ic("droite")}</span></a>`;
-  return `<div class="chips"><button class="chip" data-a="vue" data-v="reglages">${ic("gauche")} Foyer</button></div>
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>
     <div class="carte">${entete("Services")}${SERVICES.map(lien).join("")}</div>
     <div class="carte">${entete("Notifications : clés d'envoi")}
       <p class="petit">À faire une seule fois. La clé privée n'est conservée nulle part : copie-la tout de suite dans Cloudflare (secret VAPID_PRIVATE), et la clé publique dans la variable VAPID_PUBLIC. Générer de nouvelles clés oblige chacun à réactiver les notifications.</p>
@@ -254,30 +255,32 @@ function admin() {
         .map(([a, b]) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` })).join("")}</div>
     <div class="carte petit">Aucune clé ni aucun secret n'est stocké dans l'application : les accès passent par ton compte sur chaque service.</div>`;
 }
-const vues = { routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin, bilan: bilanSante };
-const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité", admin: "Administration", routine: "Routine", bilan: "Bilan santé" };
+const vues = { plus, routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin, bilan: bilanSante };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Santé", foin: "Stocks", plus: "Plus", contacts: "Contacts", reglages: "Foyer et notifications", journal: "Activité", admin: "Administration", routine: "Routine", bilan: "Bilan santé" };
 
+const ONGLET = v => (v === "fiche" || v === "routine" ? "chevaux" : v === "bilan" ? "soins" : ["contacts", "reglages", "journal", "admin"].includes(v) ? "plus" : v);
 function rendre() {
   if (!S.foyer) return;
-  if (S.vue === "admin" && !estAdmin()) S.vue = "reglages";
+  if (S.vue === "admin" && !estAdmin()) S.vue = "plus";
   if (S.vue === "fiche" && !S.foyer.chevaux?.[S.cheval]) S.vue = "chevaux";
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" || S.vue === "routine" ? "chevaux" : S.vue === "bilan" ? "soins" : S.vue)));
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === ONGLET(S.vue)));
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
   const nbSoins = soinsPrevus().filter(x => S.foyer.chevaux[x.chevalId].actif !== false && x.j !== null && x.j <= 0).length;
   const bs = document.querySelector("nav button[data-v=soins]");
   bs.querySelector(".pastille")?.remove();
   if (nbSoins) bs.insertAdjacentHTML("beforeend", `<span class="pastille" aria-label="${nbSoins} soins à faire">${nbSoins > 9 ? "9+" : nbSoins}</span>`);
-  bs.title = nbSoins ? `Soins (${nbSoins} à faire)` : "Soins";
+  bs.title = nbSoins ? `Santé (${nbSoins} à faire)` : "Santé";
   try { nbSoins ? navigator.setAppBadge?.(nbSoins) : navigator.clearAppBadge?.(); } catch { /* non pris en charge */ }
   $("#titre").textContent = S.vue === "fiche" ? nomCheval(S.cheval) : S.vue === "chevaux" ? MOTS().pl : TITRES[S.vue];
-  { const bc = document.querySelector("nav button[data-v=chevaux]"); bc.title = bc.ariaLabel = MOTS().pl; }
+  { const bc = document.querySelector("nav button[data-v=chevaux]"); bc.title = bc.ariaLabel = MOTS().pl; bc.querySelector(".lib").textContent = MOTS().pl; }
   $("#sous").textContent = {
     accueil: new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
     chevaux: `${nbC} ${nbC > 1 ? MOTS().actifs : MOTS().actif}`,
     soins: "Vaccins, ferrure, dentiste…",
+    plus: "Contacts, activité, réglages",
     foin: "Foin, copeaux et autres stocks",
     contacts: "Fournisseurs et soignants",
-    reglages: "Partage et compte",
+    reglages: "Partage, notifications et compte",
     journal: "Ce que fait la famille",
     admin: "Services et diagnostic",
     routine: "Consignes du matin et du soir",
@@ -311,7 +314,7 @@ function majStock(p) {
   return `<p class="hero-m">Calculé depuis le comptage du <b>${fr(d)}</b> (${fmtQte(+p.last.balles || 0)})${dern}${so.length > 1 ? ` (${so.length} sorties)` : ""}${liv}</p>`;
 }
 const auj_ch = enChaine;
-function hero(p, seuil, g) {
+function hero(p, seuil, g, court = false) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
     <p class="hero-s">Compte tes balles pour démarrer le suivi du stock.</p><button class="btn or" data-a="inventaire">Premier comptage</button></section>`;
   const prev = p.historique, bas = prev && p.jours !== null && p.jours <= seuil, mid = prev && !bas && p.jours !== null && p.jours <= seuil * 2;
@@ -323,7 +326,7 @@ function hero(p, seuil, g) {
       <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
       <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
     : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div>`}
-  ${pile(p.stockAuj, g)}${majStock(p)}
+  ${court ? `<div class="pile-r">${pile(p.stockAuj, g)}</div><button class="btn or plein" data-a="inventaire">${ic("check")} Faire le point</button>` : pile(p.stockAuj, g) + majStock(p)}
   </section>`;
 }
 
@@ -368,10 +371,10 @@ function accueil() {
   if (p && S.stockPrec != null && S.stockPrec - p.stockAuj > 0.05 && S.stockPrec - p.stockAuj < 6) S.ghost = { n: Math.min(3, Math.ceil(S.stockPrec - p.stockAuj - 1e-6)), t: now };
   if (p) S.stockPrec = p.stockAuj;
   const ghost = S.ghost && now - S.ghost.t < 1100 ? { n: S.ghost.n, ecoule: now - S.ghost.t } : null;
-  return hero(p, seuil, ghost) + carteSurveiller() + carteDepuisVisite() + statistiques(nbC, plan) + (p ? rapide(p) : "") + carteCommande(p) +
-    (plan.length ? `<div class="carte">${entete("Soins à prévoir", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
-      ${urgents.length ? urgents.slice(0, 5).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
-      ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + carteStocks() + carteRoutine() + activiteRecente();
+  return hero(p, seuil, ghost, true) + carteSurveiller() +
+    (plan.length ? `<div class="carte">${entete("Prochains soins", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
+      ${urgents.length ? urgents.slice(0, 3).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
+      ${urgents.length > 3 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + carteDepuisVisite() + carteRoutine();
 }
 
 /* --- À surveiller (supervision) --- */
@@ -427,7 +430,7 @@ function activiteRecente() {
 }
 function journal() {
   const l = journalListe().slice(0, 150);
-  let html = `<div class="chips"><button class="chip" data-a="vue" data-v="accueil">${ic("gauche")} Accueil</button></div>`;
+  let html = `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>`;
   if (!l.length) return html + vide("check", "Rien pour l'instant. Les retraits de balles, soins et livraisons notés par la famille apparaîtront ici.");
   html += `<p class="petit astuce">Chaque action peut être annulée ici. Une annulation peut elle-même être rétablie.</p>`;
   let dernier = "", ouvert = false;
@@ -461,7 +464,7 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + `<button class="btn sec plein" style="margin-bottom:10px" data-a="vue" data-v="bilan">${ic("croix")} Bilan santé : où en est chaque animal</button>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return `<div class="chips passe">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + `<button class="btn sec plein" style="margin-bottom:10px" data-a="vue" data-v="bilan">${ic("croix")} Bilan santé : où en est chaque animal</button>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
@@ -483,7 +486,7 @@ function bilanSante() {
     return `<div class="carte">${entete(`<span class="nom-bilan">${avatarC(c)} ${esc(c.nom)}</span>`, `<button class="btn sec petit-b" data-a="carnet" data-id="${c.id}">${ic("plus")} Carnet</button>`)}${lignes.join("")}</div>`;
   });
   const tuile = (v, l, c = "") => `<div class="stat ${c}"><b>${v}</b><span>${l}</span></div>`;
-  return `<div class="chips"><button class="chip" data-a="vue" data-v="soins">${ic("gauche")} Soins</button></div>
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="soins">${ic("gauche")} Santé</button></div>
     ${betes.length ? `<div class="stats">${tuile(n.retard, "en retard", n.retard ? "alerte-t" : "")}${tuile(n.bientot, "sous 30 jours")}${tuile(n.non, "non suivis")}</div>` : ""}
     ${n.non ? `<p class="petit astuce">Les soins « non suivis » ne déclenchent aucun rappel : renseigne la date du dernier passage d'après le carnet pour les suivre.</p>` : ""}
     ${cartes.join("") || vide("fer", "Ajoute d'abord un animal.")}`;
@@ -549,7 +552,7 @@ function routine() {
 function carteRoutine() {
   if (!liste(S.foyer.routine).length) return "";
   const l = routineListe(S.moment), chip = m => `<button class="chip ${S.moment === m ? "actif" : ""}" data-a="momentRoutine" data-m="${m}">${ic(MOMENTS[m][1])}${MOMENTS[m][0]}</button>`;
-  return `<div class="carte">${entete("Routine", bouton("droite", "vue", 'data-v="routine"', "Modifier la routine"))}<div class="chips pet">${chip("matin")}${chip("soir")}</div>
+  return `<div class="carte">${entete("Routine du moment", bouton("droite", "vue", 'data-v="routine"', "Modifier la routine"))}<div class="chips pet">${chip("matin")}${chip("soir")}</div>
     ${l.length ? l.map(r => ligneRoutine(r)).join("") : `<p class="petit sobre">Rien de prévu.</p>`}</div>`;
 }
 function routineCheval(id) {
@@ -587,7 +590,7 @@ function stocksAnimal(id) {
 }
 function selecteurStock() {
   const l = articlesListe();
-  return `<div class="chips"><button class="chip ${!S.article ? "actif" : ""}" data-a="choisirStock" data-id="">${ic("blé")}Foin</button>${l.map(x =>
+  return `<div class="chips passe"><button class="chip ${!S.article ? "actif" : ""}" data-a="choisirStock" data-id="">${ic("blé")}Foin</button>${l.map(x =>
     `<button class="chip ${S.article === x.id ? "actif" : ""}" data-a="choisirStock" data-id="${x.id}">${ic("sac")}${esc(x.nom)}</button>`).join("")}<button class="chip" data-a="articleEdit" data-id="" title="Nouvel article">${ic("plus")}${l.length ? "" : "Autre stock"}</button></div>`;
 }
 function courbeArticle(x, r, auj) {
@@ -792,7 +795,9 @@ function foinVue() {
     gauche: bulle(a === "livraison" ? "blé" : "sapin", "or"), a, id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`,
     sous: [jour(x.date) > aujourdhui() ? "<b>Programmée</b>" : "", x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
   })).join("");
-  return cartePointFoin() + courbe() + graphique() + budget() +
+  const pf = prevision(S.foyer, aujourdhui());
+  const rap = pf ? (S.rapide ? rapide(pf) : `<button class="btn sec plein" data-a="basculerRapide">${ic("retour")} Afficher la sortie rapide</button>`) : "";
+  return cartePointFoin() + carteCommande(pf) + (S.rapide && pf ? rapide(pf) + `<button class="btn sec plein" data-a="basculerRapide">Masquer la sortie rapide</button>` : rap) + courbe() + graphique() + budget() +
     `<div class="carte">${entete("Comptages du foin", bouton("reglage", "params", "", "Seuil d'alerte") + bouton("plus", "inventaire", "", "Nouveau comptage"))}
       ${cs.length ? cs.map(c => { const p = per[c.id]; return rangee({
         gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
@@ -809,7 +814,7 @@ function foinVue() {
 function contacts() {
   const l = liste(S.foyer.contacts).sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
   const act = (i, href, label) => `<a class="ib rond" href="${href}" aria-label="${label}" title="${label}" target="${href.startsWith("http") ? "_blank" : "_self"}" rel="noopener">${ic(i)}</a>`;
-  return (l.length ? `<div class="carte liste">${l.map(c => rangee({
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>` + (l.length ? `<div class="carte liste">${l.map(c => rangee({
     gauche: bulle(ICONE_ROLE[c.role] || "user", "vert"), a: "contact", id: c.id, titre: esc(c.nom),
     sous: [esc(c.role || ""), esc(c.adresse || "")].filter(Boolean).join(" · "),
     droite: `<span class="actions-r">${c.tel ? act("tel", "tel:" + esc(c.tel), "Appeler") : ""}${c.email ? act("mail", "mailto:" + esc(c.email), "Écrire") : ""}${c.adresse ? act("pin", "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(c.adresse), "Itinéraire") : ""}</span>`
@@ -820,17 +825,25 @@ function contacts() {
 /* --- Foyer --- */
 function reglages() {
   const m = liste(S.foyer.membres), ios = /iphone|ipad/i.test(navigator.userAgent) && !navigator.standalone;
-  return `<div class="carte centre"><div class="petit">Code d'invitation de « ${esc(S.foyer.nom)} »</div>
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>
+    <div class="carte centre"><div class="petit">Code d'invitation de « ${esc(S.foyer.nom)} »</div>
       <div class="code-grand">${esc(S.foyer.code)}</div>
       <button class="btn sec" data-a="copier">${ic("copie")} Copier le code</button></div>
     <div class="carte">${entete("Membres", bouton("crayon", "prenom", "", "Modifier mon prénom"))}${m.map(x => rangee({ gauche: avatar(x.nom || x.email), titre: esc(x.nom || x.email), sous: x.nom ? esc(x.email) : "" })).join("")}</div>
     ${carteNotifs()}
     ${S.install ? `<button class="btn plein" data-a="installer">${ic("plus")} Installer l'application</button>` : ""}
     ${ios ? `<div class="carte petit">Sur iPhone : touche le bouton Partager, puis « Sur l'écran d'accueil » pour installer l'application.</div>` : ""}
-    <button class="btn sec plein" data-a="vue" data-v="journal">${ic("retour")} Activité et annulations</button>
-    ${estAdmin() ? `<button class="btn sec plein" data-a="vue" data-v="admin">${ic("fer")} Administration</button>` : ""}
-    <button class="btn sec plein" data-a="intro">Revoir la présentation</button>
-    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>
+    <p class="petit centre version">Écurie · version ${VERSION} · ${fr(DATE_VERSION)}</p>`;
+}
+function plus() {
+  const nc = liste(S.foyer.contacts).length, m = liste(S.foyer.membres).length;
+  const ligne = (i, t, s, v) => rangee({ gauche: bulle(i, "neutre"), titre: t, sous: s, a: "vue", id: "", classe: "", droite: "" }).replace('data-a="vue"', `data-a="vue" data-v="${v}"`);
+  return `<div class="carte liste">${ligne("user", "Contacts", nc ? `${nc} contact${nc > 1 ? "s" : ""} : fournisseur, vétérinaire, maréchal…` : "Fournisseur, vétérinaire, maréchal…", "contacts")}
+    ${ligne("retour", "Activité et annulations", "Ce que fait la famille, annuler une action", "journal")}
+    ${ligne("cloche", "Foyer et notifications", `${m} membre${m > 1 ? "s" : ""} · code d'invitation · rappels sur ce téléphone`, "reglages")}
+    ${estAdmin() ? ligne("fer", "Administration", "Services et diagnostic", "admin") : ""}</div>
+    <div class="carte liste"><button class="btn sec plein" data-a="intro">Revoir la présentation</button>
+    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button></div>
     <p class="petit centre version">Écurie · version ${VERSION} · ${fr(DATE_VERSION)}</p>`;
 }
 
@@ -1041,6 +1054,7 @@ const actions = {
   },
   pas: (_i, d) => { const e = $("#" + d.c); e.value = fmtQte(Math.max(0, parseQte(e.value) + +d.p)); e.dispatchEvent(new Event("input", { bubbles: true })); },
   chip: (_i, d) => { const e = $("#" + d.c); e.value = d.q; e.dispatchEvent(new Event("input", { bubbles: true })); },
+  basculerRapide: () => { S.rapide = !S.rapide; ecrireLocal("ecurie-rapide", S.rapide ? "1" : "0"); rendre(); },
   aller: id => { if (id === "foin") S.article = null; S.vue = id; window.scrollTo(0, 0); rendre(); },
   vue: (_id, d) => { S.vue = d.v; window.scrollTo(0, 0); rendre(); },
   filtre: (_id, d) => { S.filtre = d.f; rendre(); },

@@ -343,3 +343,14 @@ circle.cv-fin.cv-a-t{fill:var(--or)}circle.cv-fin.cv-b-t{fill:var(--bleu)}
 
 .nom-bilan{display:flex;align-items:center;gap:10px}.nom-bilan .av{width:34px;height:34px}
 .carte-l{border-top:1px solid var(--bord);padding:12px 0 4px;margin-top:8px}.carte-l>label{display:flex;align-items:center;gap:8px;font-weight:700}
+
+/* Refonte v35 : menu à libellés, pile réduite */
+nav button{flex-direction:column;gap:2px;padding:4px 0}
+nav svg{width:24px;height:24px}
+nav .lib{font-size:.66rem;font-weight:600;line-height:1}
+.pile-r{max-height:46px;overflow:hidden;margin-bottom:10px}
+.pile-r .pile{margin-top:8px;gap:3px;transform-origin:left top}
+.pile-r .bl{width:20px;height:13px}
+.pile-r .tas{width:34px;height:23px}
+.pile-r .legende-h{display:none}
+.chips.passe{flex-wrap:wrap;overflow:visible}
