@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock } from "./prevision.js";
+import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock, pointFoin } from "./prevision.js";
 import { suivi } from "./stocks.js";
 import { TYPES, libelleSoin, echeance, prochaine, rdvActif, joursAvant, ponctuel, soinPourEspece } from "./soins.js";
 
@@ -90,7 +90,10 @@ const MOTS = () => (multi() ? { pl: "Animaux", actifs: "animaux actifs", actif: 
 const libAnimal = (esp, nom) => (esp === "autre" ? `l'animal ${nom}` : `le ${ESPECES[esp][0].toLowerCase()} ${nom}`);
 const nomCheval = id => S.foyer?.chevaux?.[id]?.nom || "Cheval supprimé";
 const lire = k => { try { return localStorage.getItem(k); } catch { return null; } };
+S.vuPrec = (() => { try { return +localStorage.getItem("ecurie-vu") || null; } catch { return null; } })();
 const ecrireLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } };
+if (!S.vuPrec) ecrireLocal("ecurie-vu", String(Date.now()));
+S.rapide = lire("ecurie-rapide") === "1";
 const vite = p => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, 1200))]); // ne bloque pas l'écran hors réseau
 const vibre = () => navigator.vibrate?.(12);
 const qui = () => S.foyer?.membres?.[S.user.uid]?.nom || (S.user.email.split("@")[0].replace(/^./, c => c.toUpperCase()));
@@ -226,7 +229,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "31", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "35", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -240,7 +243,7 @@ const SERVICES = [
 function admin() {
   const f = S.foyer, nb = o => liste(o).length, dern = liste(f.journal).reduce((m, j) => Math.max(m, j.ts || 0), 0);
   const lien = ([t, s, u]) => `<a class="rangee" href="${u}" target="_blank" rel="noopener"><div class="corps"><div class="titre">${t}</div><div class="petit">${s}</div></div><span class="chev">${ic("droite")}</span></a>`;
-  return `<div class="chips"><button class="chip" data-a="vue" data-v="reglages">${ic("gauche")} Foyer</button></div>
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>
     <div class="carte">${entete("Services")}${SERVICES.map(lien).join("")}</div>
     <div class="carte">${entete("Notifications : clés d'envoi")}
       <p class="petit">À faire une seule fois. La clé privée n'est conservée nulle part : copie-la tout de suite dans Cloudflare (secret VAPID_PRIVATE), et la clé publique dans la variable VAPID_PUBLIC. Générer de nouvelles clés oblige chacun à réactiver les notifications.</p>
@@ -252,33 +255,36 @@ function admin() {
         .map(([a, b]) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` })).join("")}</div>
     <div class="carte petit">Aucune clé ni aucun secret n'est stocké dans l'application : les accès passent par ton compte sur chaque service.</div>`;
 }
-const vues = { routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin };
-const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité", admin: "Administration", routine: "Routine" };
+const vues = { plus, routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin, bilan: bilanSante };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Santé", foin: "Stocks", plus: "Plus", contacts: "Contacts", reglages: "Foyer et notifications", journal: "Activité", admin: "Administration", routine: "Routine", bilan: "Bilan santé" };
 
+const ONGLET = v => (v === "fiche" || v === "routine" ? "chevaux" : v === "bilan" ? "soins" : ["contacts", "reglages", "journal", "admin"].includes(v) ? "plus" : v);
 function rendre() {
   if (!S.foyer) return;
-  if (S.vue === "admin" && !estAdmin()) S.vue = "reglages";
+  if (S.vue === "admin" && !estAdmin()) S.vue = "plus";
   if (S.vue === "fiche" && !S.foyer.chevaux?.[S.cheval]) S.vue = "chevaux";
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" || S.vue === "routine" ? "chevaux" : S.vue)));
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === ONGLET(S.vue)));
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
   const nbSoins = soinsPrevus().filter(x => S.foyer.chevaux[x.chevalId].actif !== false && x.j !== null && x.j <= 0).length;
   const bs = document.querySelector("nav button[data-v=soins]");
   bs.querySelector(".pastille")?.remove();
   if (nbSoins) bs.insertAdjacentHTML("beforeend", `<span class="pastille" aria-label="${nbSoins} soins à faire">${nbSoins > 9 ? "9+" : nbSoins}</span>`);
-  bs.title = nbSoins ? `Soins (${nbSoins} à faire)` : "Soins";
+  bs.title = nbSoins ? `Santé (${nbSoins} à faire)` : "Santé";
   try { nbSoins ? navigator.setAppBadge?.(nbSoins) : navigator.clearAppBadge?.(); } catch { /* non pris en charge */ }
   $("#titre").textContent = S.vue === "fiche" ? nomCheval(S.cheval) : S.vue === "chevaux" ? MOTS().pl : TITRES[S.vue];
-  { const bc = document.querySelector("nav button[data-v=chevaux]"); bc.title = bc.ariaLabel = MOTS().pl; }
+  { const bc = document.querySelector("nav button[data-v=chevaux]"); bc.title = bc.ariaLabel = MOTS().pl; bc.querySelector(".lib").textContent = MOTS().pl; }
   $("#sous").textContent = {
     accueil: new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
     chevaux: `${nbC} ${nbC > 1 ? MOTS().actifs : MOTS().actif}`,
     soins: "Vaccins, ferrure, dentiste…",
+    plus: "Contacts, activité, réglages",
     foin: "Foin, copeaux et autres stocks",
     contacts: "Fournisseurs et soignants",
-    reglages: "Partage et compte",
+    reglages: "Partage, notifications et compte",
     journal: "Ce que fait la famille",
     admin: "Services et diagnostic",
     routine: "Consignes du matin et du soir",
+    bilan: "Où en est chaque animal",
     fiche: "Fiche du cheval"
   }[S.vue];
   if (S.vue === "fiche") { const e = espece(S.foyer.chevaux[S.cheval]); $("#sous").textContent = e === "autre" ? "Fiche de l'animal" : `Fiche du ${ESPECES[e][0].toLowerCase()}`; }
@@ -308,7 +314,7 @@ function majStock(p) {
   return `<p class="hero-m">Calculé depuis le comptage du <b>${fr(d)}</b> (${fmtQte(+p.last.balles || 0)})${dern}${so.length > 1 ? ` (${so.length} sorties)` : ""}${liv}</p>`;
 }
 const auj_ch = enChaine;
-function hero(p, seuil, g) {
+function hero(p, seuil, g, court = false) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
     <p class="hero-s">Compte tes balles pour démarrer le suivi du stock.</p><button class="btn or" data-a="inventaire">Premier comptage</button></section>`;
   const prev = p.historique, bas = prev && p.jours !== null && p.jours <= seuil, mid = prev && !bas && p.jours !== null && p.jours <= seuil * 2;
@@ -320,7 +326,7 @@ function hero(p, seuil, g) {
       <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
       <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
     : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div>`}
-  ${pile(p.stockAuj, g)}${majStock(p)}
+  ${court ? `<div class="pile-r">${pile(p.stockAuj, g)}</div><button class="btn or plein" data-a="inventaire">${ic("check")} Faire le point</button>` : pile(p.stockAuj, g) + majStock(p)}
   </section>`;
 }
 
@@ -365,10 +371,46 @@ function accueil() {
   if (p && S.stockPrec != null && S.stockPrec - p.stockAuj > 0.05 && S.stockPrec - p.stockAuj < 6) S.ghost = { n: Math.min(3, Math.ceil(S.stockPrec - p.stockAuj - 1e-6)), t: now };
   if (p) S.stockPrec = p.stockAuj;
   const ghost = S.ghost && now - S.ghost.t < 1100 ? { n: S.ghost.n, ecoule: now - S.ghost.t } : null;
-  return hero(p, seuil, ghost) + statistiques(nbC, plan) + (p ? rapide(p) : "") + carteCommande(p) +
-    (plan.length ? `<div class="carte">${entete("Soins à prévoir", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
-      ${urgents.length ? urgents.slice(0, 5).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
-      ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + carteStocks() + carteRoutine() + activiteRecente();
+  return hero(p, seuil, ghost, true) + carteSurveiller() +
+    (plan.length ? `<div class="carte">${entete("Prochains soins", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
+      ${urgents.length ? urgents.slice(0, 3).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
+      ${urgents.length > 3 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + carteDepuisVisite() + carteRoutine();
+}
+
+/* --- À surveiller (supervision) --- */
+const nbNonSuivis = () => liste(S.foyer.chevaux).filter(c => c.actif !== false).reduce((n, c) => n + TYPES_CARNET().filter(t => soinPourEspece(t, c.espece) && !liste(S.foyer.soins).some(s => s.chevalId === c.id && s.type === t)).length, 0);
+function surveiller() {
+  const auj = aujourdhui(), f = S.foyer.foin || {}, seuil = +f.seuilJours || 14, seuilC = +f.comptageJours || 21, l = [], pl = (k, m, p = m + "s") => (k > 1 ? p : m);
+  const pt = pointFoin(S.foyer, auj);
+  if (!pt) { if (liste(S.foyer.chevaux).length) l.push({ n: 2, i: "blé", t: "Foin : aucun comptage", s: "Compte tes balles pour démarrer le suivi", a: "inventaire" }); }
+  else {
+    const p = pt.p;
+    if (p.historique && p.jours !== null && p.jours <= seuil) l.push({ n: p.jours <= seuil / 2 ? 0 : 1, i: "blé", t: `Foin : ${p.jours} ${pl(p.jours, "jour")} de stock`, s: `Rupture prévue le ${fr(p.rupture)}${pt.aCommander12 ? ` · à commander ≈ ${Math.round(pt.aCommander12)} balles` : ""}`, a: "aller", id: "foin" });
+    if (pt.jDepuis >= seuilC) l.push({ n: 1, i: "check", t: `Comptage de foin ancien : il y a ${pt.jDepuis} jours`, s: "Un nouveau comptage affine la prévision", a: "inventaire" });
+    const liv = pt.aVenir[0]; if (liv && jour(liv.date) - auj <= 14) l.push({ n: 2, i: "blé", t: `Livraison de foin : ${balles(+liv.balles || 0)}`, s: `Prévue ${quand(jour(liv.date) - auj)} (${frCourt(liv.date)})`, a: "livraison", id: liv.id });
+  }
+  const plan = soinsPrevus().filter(s => S.foyer.chevaux[s.chevalId].actif !== false && s.j !== null), noms = g => g.slice(0, 3).map(s => esc(`${libelleSoin(s)} · ${S.foyer.chevaux[s.chevalId].nom}`)).join(", ") + (g.length > 3 ? ` + ${g.length - 3}` : "");
+  const retard = plan.filter(s => s.j < 0), sem = plan.filter(s => s.j >= 0 && s.j <= 7);
+  if (retard.length) l.push({ n: 0, i: "croix", t: `${retard.length} ${pl(retard.length, "soin")} en retard`, s: noms(retard), a: "aller", id: "soins" });
+  if (sem.length) l.push({ n: 1, i: "calendrier", t: `${sem.length} ${pl(sem.length, "soin")} cette semaine`, s: noms(sem), a: "aller", id: "soins" });
+  const ns = nbNonSuivis(); if (ns) l.push({ n: 2, i: "croix", t: `${ns} ${pl(ns, "soin")} non ${pl(ns, "suivi")}`, s: "Renseigne le carnet pour déclencher les rappels", a: "aller", id: "bilan" });
+  articlesListe().forEach(x => { const r = suivi(x, auj); if (etatArticle(x, r).u === "retard") l.push({ n: 0, i: "sac", t: `${x.nom} : à commander`, s: r.nb ? `Environ ${r.jours} jours` : "Stock vide", a: "voirArticle", id: x.id }); });
+  const jr = journalListe(); if (jr.length) { const d0 = Math.floor((Date.now() - jr[0].ts) / 864e5); if (d0 >= 7) l.push({ n: 2, i: "retour", t: `Aucune activité notée depuis ${d0} jours`, s: "Les sorties et les soins ne sont peut-être plus notés", a: "aller", id: "journal" }); }
+  return l.sort((x, y) => x.n - y.n).slice(0, 6);
+}
+function carteSurveiller() {
+  if (!liste(S.foyer.chevaux).length) return "";
+  const l = surveiller();
+  if (!l.length) return `<div class="carte commande ok">${bulle("check", "vert")}<div><b>Tout est à jour</b><div class="petit">Rien d'urgent côté foin, soins et stocks.</div></div></div>`;
+  return `<div class="carte">${entete("À surveiller")}${l.map(x => rangee({ gauche: bulle(x.i, x.n === 0 ? "retard" : x.n === 1 ? "bientot" : "neutre"), titre: x.t, sous: x.s, a: x.a, id: x.id || "" })).join("")}</div>`;
+}
+function carteDepuisVisite() {
+  if (!S.vuPrec) return "";
+  const l = journalListe().filter(j => j.uid && j.uid !== S.user.uid && j.ts > S.vuPrec && !j.annule);
+  if (!l.length) return "";
+  const par = {}; l.forEach(j => { par[j.qui] = (par[j.qui] || 0) + 1; });
+  return `<div class="carte">${entete("Depuis ta dernière visite", bouton("droite", "aller", 'data-id="journal"', "Toute l'activité"))}
+    <p class="petit">${Object.entries(par).map(([q, n]) => `${esc(q)} : ${n} action${n > 1 ? "s" : ""}`).join(" · ")}</p>${l.slice(0, 4).map(j => ligneJournal(j)).join("")}</div>`;
 }
 
 /* --- Activité de la famille --- */
@@ -388,7 +430,7 @@ function activiteRecente() {
 }
 function journal() {
   const l = journalListe().slice(0, 150);
-  let html = `<div class="chips"><button class="chip" data-a="vue" data-v="accueil">${ic("gauche")} Accueil</button></div>`;
+  let html = `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>`;
   if (!l.length) return html + vide("check", "Rien pour l'instant. Les retraits de balles, soins et livraisons notés par la famille apparaîtront ici.");
   html += `<p class="petit astuce">Chaque action peut être annulée ici. Une annulation peut elle-même être rétablie.</p>`;
   let dernier = "", ouvert = false;
@@ -422,8 +464,32 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return `<div class="chips passe">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + `<button class="btn sec plein" style="margin-bottom:10px" data-a="vue" data-v="bilan">${ic("croix")} Bilan santé : où en est chaque animal</button>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
+}
+
+/* --- Bilan santé --- */
+const TYPES_CARNET = () => Object.keys(TYPES).filter(t => t !== "autre");
+function bilanSante() {
+  const betes = liste(S.foyer.chevaux).filter(c => c.actif !== false).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
+  const plan = soinsPrevus(), n = { retard: 0, bientot: 0, ok: 0, non: 0 };
+  const cartes = betes.map(c => {
+    const mes = plan.filter(s => s.chevalId === c.id);
+    const lignes = mes.map(s => {
+      const u = urgence(s.j); if (s.j !== null) n[u === "retard" ? "retard" : u === "bientot" ? "bientot" : "ok"]++;
+      return rangee({ gauche: bulle(ICONE_SOIN[s.type] || "croix", u), a: "soin", id: s.id, titre: esc(libelleSoin(s)),
+        sous: ponctuel(s) ? `Ponctuel · ${s.ech ? frCourt(s.ech) : "à planifier"}` : `${s.dernier ? "Fait le " + frCourt(s.dernier) : "Jamais noté"} · ${s.rdvOk ? "RDV " : "prochain "}${s.ech ? frCourt(s.ech) : "à planifier"}`,
+        droite: s.j === null ? `<span class="badge neutre">À planifier</span>` : `<span class="badge ${u}">${quand(s.j)}</span>` });
+    });
+    const manquants = TYPES_CARNET().filter(t => soinPourEspece(t, c.espece) && !liste(S.foyer.soins).some(s => s.chevalId === c.id && s.type === t));
+    manquants.forEach(t => { n.non++; lignes.push(rangee({ gauche: bulle(ICONE_SOIN[t] || "croix", "neutre"), a: "carnet", id: c.id, titre: TYPES[t].nom, sous: "Non suivi : touche pour renseigner", droite: `<span class="badge neutre">?</span>` })); });
+    return `<div class="carte">${entete(`<span class="nom-bilan">${avatarC(c)} ${esc(c.nom)}</span>`, `<button class="btn sec petit-b" data-a="carnet" data-id="${c.id}">${ic("plus")} Carnet</button>`)}${lignes.join("")}</div>`;
+  });
+  const tuile = (v, l, c = "") => `<div class="stat ${c}"><b>${v}</b><span>${l}</span></div>`;
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="soins">${ic("gauche")} Santé</button></div>
+    ${betes.length ? `<div class="stats">${tuile(n.retard, "en retard", n.retard ? "alerte-t" : "")}${tuile(n.bientot, "sous 30 jours")}${tuile(n.non, "non suivis")}</div>` : ""}
+    ${n.non ? `<p class="petit astuce">Les soins « non suivis » ne déclenchent aucun rappel : renseigne la date du dernier passage d'après le carnet pour les suivre.</p>` : ""}
+    ${cartes.join("") || vide("fer", "Ajoute d'abord un animal.")}`;
 }
 
 /* --- Chevaux --- */
@@ -486,7 +552,7 @@ function routine() {
 function carteRoutine() {
   if (!liste(S.foyer.routine).length) return "";
   const l = routineListe(S.moment), chip = m => `<button class="chip ${S.moment === m ? "actif" : ""}" data-a="momentRoutine" data-m="${m}">${ic(MOMENTS[m][1])}${MOMENTS[m][0]}</button>`;
-  return `<div class="carte">${entete("Routine", bouton("droite", "vue", 'data-v="routine"', "Modifier la routine"))}<div class="chips pet">${chip("matin")}${chip("soir")}</div>
+  return `<div class="carte">${entete("Routine du moment", bouton("droite", "vue", 'data-v="routine"', "Modifier la routine"))}<div class="chips pet">${chip("matin")}${chip("soir")}</div>
     ${l.length ? l.map(r => ligneRoutine(r)).join("") : `<p class="petit sobre">Rien de prévu.</p>`}</div>`;
 }
 function routineCheval(id) {
@@ -524,7 +590,7 @@ function stocksAnimal(id) {
 }
 function selecteurStock() {
   const l = articlesListe();
-  return `<div class="chips"><button class="chip ${!S.article ? "actif" : ""}" data-a="choisirStock" data-id="">${ic("blé")}Foin</button>${l.map(x =>
+  return `<div class="chips passe"><button class="chip ${!S.article ? "actif" : ""}" data-a="choisirStock" data-id="">${ic("blé")}Foin</button>${l.map(x =>
     `<button class="chip ${S.article === x.id ? "actif" : ""}" data-a="choisirStock" data-id="${x.id}">${ic("sac")}${esc(x.nom)}</button>`).join("")}<button class="chip" data-a="articleEdit" data-id="" title="Nouvel article">${ic("plus")}${l.length ? "" : "Autre stock"}</button></div>`;
 }
 function courbeArticle(x, r, auj) {
@@ -607,10 +673,10 @@ function courbe() {
   const auj = aujourdhui(), c = courbeStock(S.foyer, auj); if (!c) return "";
   const W = 340, H = 196, gauche = 30, droite = 10, haut = 14, bas = 24, hh = H - haut - bas;
   const ruptures = [c.A?.rupture, c.B?.rupture].filter(Boolean);
-  const proche = !c.A && !c.B ? 60 : Math.min(365, Math.max(60, ...ruptures.map(r => r - c.jAuj + 25), ...(ruptures.length < [c.A, c.B].filter(Boolean).length ? [365] : [0])));
+  const proche = !c.A && !c.B ? 60 : Math.min(365, Math.max(60, ...ruptures.map(r => r - c.jAuj + 25), ...c.livFutures.map(l => l.j - c.jAuj + 20), ...(ruptures.length < [c.A, c.B].filter(Boolean).length ? [365] : [0])));
   const jmin = S.hist ? Math.max(c.hist[0].j, c.jAuj - S.hist) : c.hist[0].j, jmax = c.jAuj + proche;
   const vis = c.hist.filter(h => h.j >= jmin);
-  const maxVu = Math.max(1, ...vis.map(h => h.s), c.sAuj);
+  const maxVu = Math.max(1, ...vis.map(h => h.s), c.sAuj, ...[c.A, c.B].filter(Boolean).flatMap(x => x.pts.filter(q => q.j <= jmax).map(q => q.s)));
   const pas = maxVu <= 12 ? 2 : maxVu <= 30 ? 5 : maxVu <= 60 ? 10 : maxVu <= 120 ? 20 : maxVu <= 300 ? 50 : 100, ymax = Math.ceil(maxVu * 1.08 / pas) * pas;
   const X = j => gauche + (j - jmin) / (jmax - jmin) * (W - gauche - droite), Y = v => haut + hh - Math.min(v, ymax) / ymax * hh;
   const chemin = pts => pts.map((q, i) => `${i ? "L" : "M"}${X(q.j).toFixed(1)} ${Y(q.s).toFixed(1)}`).join("");
@@ -632,6 +698,7 @@ function courbe() {
   if (c.B) svg += `<path d="${chemin(c.B.pts)}" class="cv-b"/>`;
   svg += `<path d="${chemin(vis)}" class="cv-h"/>`;
   c.livraisons.filter(l => l.j >= jmin).forEach(l => { const q = c.hist.find(h => h.j === l.j); if (q) svg += `<circle cx="${X(l.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="4" class="cv-liv"/>`; });
+  c.livFutures.forEach(l => { const q = (c.A || c.B)?.pts.filter(x => x.j === l.j).pop(); if (q) svg += `<circle cx="${X(l.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="4" class="cv-liv"/>`; });
   c.comp.filter(q => q.j >= jmin).forEach(q => { svg += `<circle cx="${X(q.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="2.800" class="cv-cpt"/>`; });
   [[c.A, "cv-a-t", -9], [c.B, "cv-b-t", -21]].forEach(([pr, cl, dy]) => { if (!pr?.rupture) return; const x = X(pr.rupture), fin = x > W - 52; svg += `<circle cx="${x.toFixed(1)}" cy="${Y(0)}" r="4" class="cv-fin ${cl}"/><text class="val ${cl}" x="${(fin ? x + 4 : x).toFixed(1)}" y="${Y(0) + dy}" text-anchor="${fin ? "end" : "middle"}">${fr(enChaine(pr.rupture)).slice(0, 5)}</text>`; });
   svg += `<line id="cvx" class="cv-croix" y1="${haut}" y2="${haut + hh}" x1="0" x2="0"/>`;
@@ -641,13 +708,13 @@ function courbe() {
     c.A ? `<div class="cv-l"><i class="k a"></i><span>Années précédentes : ${dans(c.A)}</span></div>` : "",
     c.B ? `<div class="cv-l"><i class="k b"></i><span>Consommation actuelle (${taux(c.rateB)} balle/j sur ${c.fenetre} j) : ${dans(c.B)}</span></div>` : "",
     !c.A ? `<p class="petit sobre">La courbe « années précédentes » apparaîtra quand tu auras au moins deux comptages d'écart (idéalement sur une année complète).</p>` : "",
-    c.A || c.B ? `<p class="petit sobre">Projections sans nouvelle livraison.</p>` : (c.A ? "" : `<p class="petit sobre">La projection sur la consommation actuelle apparaîtra après une semaine de sorties notées.</p>`)
+    c.A || c.B ? `<p class="petit sobre">${c.livFutures.length ? "Projections avec les livraisons programmées." : "Projections sans nouvelle livraison."}</p>` : (c.A ? "" : `<p class="petit sobre">La projection sur la consommation actuelle apparaîtra après une semaine de sorties notées.</p>`)
   ].join("");
   const chip = (v, t) => `<button class="chip ${S.hist === v ? "actif" : ""}" data-a="histo" data-h="${v}">${t}</button>`;
   return `<div class="carte cv-carte">${entete("Évolution du stock", `<div class="chips pet">${chip(180, "6 mois")}${chip(365, "1 an")}${chip(0, "Tout")}</div>`)}
     <svg viewBox="0 0 ${W} ${H}" class="courbe" role="img" aria-label="Évolution du stock de foin en balles, avec projections">${svg}</svg>
     <div class="tip" id="cvtip" hidden></div>
-    <div class="legende"><span><i class="l h"></i>Stock</span>${c.A ? `<span><i class="l a"></i>Années préc.</span>` : ""}${c.B ? `<span><i class="l b"></i>Conso actuelle</span>` : ""}${c.livraisons.length ? `<span><i class="pt liv"></i>Livraison</span>` : ""}<span><i class="pt cpt"></i>Comptage</span></div>
+    <div class="legende"><span><i class="l h"></i>Stock</span>${c.A ? `<span><i class="l a"></i>Années préc.</span>` : ""}${c.B ? `<span><i class="l b"></i>Conso actuelle</span>` : ""}${c.livraisons.length || c.livFutures.length ? `<span><i class="pt liv"></i>Livraison</span>` : ""}<span><i class="pt cpt"></i>Comptage</span></div>
     <div class="cv-res">${lignes}</div></div>`;
 }
 document.addEventListener("pointermove", e => {
@@ -687,6 +754,32 @@ function budget() {
     <p class="petit" style="margin-top:8px">${[foinAn ? `Foin ${euro(foinAn).replace(",00", "")}` : "", copAn ? `Copeaux ${euro(copAn).replace(",00", "")}` : "", ballesAn && foinAn ? `${euro(foinAn / ballesAn)} la balle en moyenne` : ""].filter(Boolean).join(" · ")}</p></div>`;
 }
 
+function cartePointFoin() {
+  const auj = aujourdhui(), pt = pointFoin(S.foyer, auj); if (!pt) return "";
+  const { p } = pt, r = pt.rythme, ligne = (a, b) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` });
+  const frais = pt.jDepuis > 21 ? `<span class="q retard">il y a ${pt.jDepuis} jours : recompte pour fiabiliser</span>` : `il y a ${pt.jDepuis} jour${pt.jDepuis > 1 ? "s" : ""}`;
+  const mois = r == null ? null : Math.round(r * 30.4);
+  return `<div class="carte point">${entete("Mon point foin", bouton("check", "inventaire", "", "Nouveau comptage"))}
+    <p class="point-t">Il reste environ <b>${balles(Math.round(p.stockAuj))}</b>${p.rupture && p.jours <= 365 ? `, de quoi tenir jusqu'au <b>${fr(p.rupture)}</b> (${p.jours} jour${p.jours > 1 ? "s" : ""})` : p.rupture ? ", de quoi tenir plus d'un an" : p.historique ? " et aucune rupture n'est prévue" : ""}.</p>
+    <div class="chiffres">${chiffre(r == null ? "–" : taux(r), "balles/jour")}${chiffre(mois == null ? "–" : mois, "balles/mois")}${chiffre(pt.depuis == null ? "–" : taux(pt.depuis), "sorties notées")}</div>
+    <p class="petit">Dernier comptage le ${fr(pt.last.date)} (${frais}).</p>
+    ${pt.besoin12 == null ? `<p class="petit sobre">Le besoin sur 12 mois apparaît après deux comptages.</p>` : `<h3 class="groupe">Sur 12 mois</h3>
+      ${ligne("Besoin prévu", `≈ ${Math.round(pt.besoin12)} balles`)}${ligne("En stock aujourd'hui", `≈ ${Math.round(p.stockAuj)} balles`)}
+      ${pt.stockAVenir ? ligne("Livraisons programmées", `${Math.round(pt.stockAVenir)} balles`) : ""}${ligne("<b>À commander pour tenir 12 mois</b>", `<b>≈ ${Math.round(pt.aCommander12)} balles</b>`)}
+      ${pt.jours12 >= 300 ? ligne("Consommé sur les 12 derniers mois", `≈ ${Math.round(pt.conso12)} balles`) : ""}`}
+    ${pt.aVenir.length ? `<h3 class="groupe">Livraisons programmées</h3>${pt.aVenir.map(l => rangee({ gauche: bulle("blé", "or"), a: "livraison", id: l.id, titre: `${balles(+l.balles || 0)} <span class="date">${frCourt(l.date)}</span>`, sous: "Touche pour modifier" })).join("")}` : ""}</div>`;
+}
+function bilanComptage(f2, date, calcule) {
+  const auj = Math.max(aujourdhui(), jour(date)), pt = pointFoin(f2, auj); if (!pt) return;
+  const { p } = pt, per = periodes(f2).find(x => x.au === date), ecart = calcule == null ? null : Math.round((p.last.date === date ? +p.last.balles || 0 : 0) - calcule);
+  const l = [];
+  if (ecart !== null) l.push(Math.abs(ecart) < 2 ? `Le calcul annonçait ≈ ${Math.round(calcule)} balles : c'est cohérent.` : `Le calcul annonçait ≈ ${Math.round(calcule)} balles, soit ${ecart > 0 ? "+" : "−"}${Math.abs(ecart)} d'écart : ${ecart > 0 ? "une livraison non notée ?" : "des sorties non notées ?"}`);
+  if (per) l.push(per.conso < 0 ? "Consommation incohérente depuis le comptage précédent : une livraison oubliée ?" : `Depuis le comptage du ${fr(per.du)} : <b>${balles(Math.round(per.conso * 10) / 10)}</b> consommées en ${per.jours} jours (${taux(per.rate)} par jour).`);
+  l.push(p.rupture && p.jours > 365 ? "À ce rythme, tu tiens plus d'un an." : p.rupture ? `À ce rythme, tu tiens jusqu'au <b>${fr(p.rupture)}</b> (${p.jours} jour${p.jours > 1 ? "s" : ""}).` : p.historique ? "Aucune rupture prévue." : "La prévision apparaîtra après deux comptages.");
+  if (pt.besoin12 != null) l.push(`Sur 12 mois : besoin ≈ <b>${Math.round(pt.besoin12)} balles</b>, à commander ≈ <b>${Math.round(pt.aCommander12)} balles</b>${pt.stockAVenir ? ` (livraisons programmées déduites)` : ""}.`);
+  ouvrir("Résultat du comptage", `<p>Comptage enregistré : <b>${balles(+p.last.balles || 0)}</b> le ${fr(date)}.</p>${l.map(x => `<p>${x}</p>`).join("")}`, () => {}, null, [], "Fermer");
+}
+
 function foin() {
   if (S.article && !S.foyer.stocks?.[S.article]) S.article = null;
   return selecteurStock() + (S.article ? articleVue(S.article) : foinVue());
@@ -700,9 +793,11 @@ function foinVue() {
   const nomC = id => esc(S.foyer.contacts?.[id]?.nom || "");
   const lignesLiv = (l, a) => l.map(x => rangee({
     gauche: bulle(a === "livraison" ? "blé" : "sapin", "or"), a, id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`,
-    sous: [x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
+    sous: [jour(x.date) > aujourdhui() ? "<b>Programmée</b>" : "", x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
   })).join("");
-  return courbe() + graphique() + budget() +
+  const pf = prevision(S.foyer, aujourdhui());
+  const rap = pf ? (S.rapide ? rapide(pf) : `<button class="btn sec plein" data-a="basculerRapide">${ic("retour")} Afficher la sortie rapide</button>`) : "";
+  return cartePointFoin() + carteCommande(pf) + (S.rapide && pf ? rapide(pf) + `<button class="btn sec plein" data-a="basculerRapide">Masquer la sortie rapide</button>` : rap) + courbe() + graphique() + budget() +
     `<div class="carte">${entete("Comptages du foin", bouton("reglage", "params", "", "Seuil d'alerte") + bouton("plus", "inventaire", "", "Nouveau comptage"))}
       ${cs.length ? cs.map(c => { const p = per[c.id]; return rangee({
         gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
@@ -719,7 +814,7 @@ function foinVue() {
 function contacts() {
   const l = liste(S.foyer.contacts).sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
   const act = (i, href, label) => `<a class="ib rond" href="${href}" aria-label="${label}" title="${label}" target="${href.startsWith("http") ? "_blank" : "_self"}" rel="noopener">${ic(i)}</a>`;
-  return (l.length ? `<div class="carte liste">${l.map(c => rangee({
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>` + (l.length ? `<div class="carte liste">${l.map(c => rangee({
     gauche: bulle(ICONE_ROLE[c.role] || "user", "vert"), a: "contact", id: c.id, titre: esc(c.nom),
     sous: [esc(c.role || ""), esc(c.adresse || "")].filter(Boolean).join(" · "),
     droite: `<span class="actions-r">${c.tel ? act("tel", "tel:" + esc(c.tel), "Appeler") : ""}${c.email ? act("mail", "mailto:" + esc(c.email), "Écrire") : ""}${c.adresse ? act("pin", "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(c.adresse), "Itinéraire") : ""}</span>`
@@ -730,17 +825,25 @@ function contacts() {
 /* --- Foyer --- */
 function reglages() {
   const m = liste(S.foyer.membres), ios = /iphone|ipad/i.test(navigator.userAgent) && !navigator.standalone;
-  return `<div class="carte centre"><div class="petit">Code d'invitation de « ${esc(S.foyer.nom)} »</div>
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="plus">${ic("gauche")} Plus</button></div>
+    <div class="carte centre"><div class="petit">Code d'invitation de « ${esc(S.foyer.nom)} »</div>
       <div class="code-grand">${esc(S.foyer.code)}</div>
       <button class="btn sec" data-a="copier">${ic("copie")} Copier le code</button></div>
     <div class="carte">${entete("Membres", bouton("crayon", "prenom", "", "Modifier mon prénom"))}${m.map(x => rangee({ gauche: avatar(x.nom || x.email), titre: esc(x.nom || x.email), sous: x.nom ? esc(x.email) : "" })).join("")}</div>
     ${carteNotifs()}
     ${S.install ? `<button class="btn plein" data-a="installer">${ic("plus")} Installer l'application</button>` : ""}
     ${ios ? `<div class="carte petit">Sur iPhone : touche le bouton Partager, puis « Sur l'écran d'accueil » pour installer l'application.</div>` : ""}
-    <button class="btn sec plein" data-a="vue" data-v="journal">${ic("retour")} Activité et annulations</button>
-    ${estAdmin() ? `<button class="btn sec plein" data-a="vue" data-v="admin">${ic("fer")} Administration</button>` : ""}
-    <button class="btn sec plein" data-a="intro">Revoir la présentation</button>
-    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>
+    <p class="petit centre version">Écurie · version ${VERSION} · ${fr(DATE_VERSION)}</p>`;
+}
+function plus() {
+  const nc = liste(S.foyer.contacts).length, m = liste(S.foyer.membres).length;
+  const ligne = (i, t, s, v) => rangee({ gauche: bulle(i, "neutre"), titre: t, sous: s, a: "vue", id: "", classe: "", droite: "" }).replace('data-a="vue"', `data-a="vue" data-v="${v}"`);
+  return `<div class="carte liste">${ligne("user", "Contacts", nc ? `${nc} contact${nc > 1 ? "s" : ""} : fournisseur, vétérinaire, maréchal…` : "Fournisseur, vétérinaire, maréchal…", "contacts")}
+    ${ligne("retour", "Activité et annulations", "Ce que fait la famille, annuler une action", "journal")}
+    ${ligne("cloche", "Foyer et notifications", `${m} membre${m > 1 ? "s" : ""} · code d'invitation · rappels sur ce téléphone`, "reglages")}
+    ${estAdmin() ? ligne("fer", "Administration", "Services et diagnostic", "admin") : ""}</div>
+    <div class="carte liste"><button class="btn sec plein" data-a="intro">Revoir la présentation</button>
+    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button></div>
     <p class="petit centre version">Écurie · version ${VERSION} · ${fr(DATE_VERSION)}</p>`;
 }
 
@@ -917,7 +1020,7 @@ const actions = {
   livraison(id) {
     const l = id ? S.foyer.foin.livraisons[id] : { date: ajd() };
     ouvrir(id ? "Modifier la livraison" : "Livraison de foin",
-      champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
+      champ("d", "Date", l.date, "date") + `<p class="petit">Une date à venir programme la livraison : le stock et la prévision l'intègrent ce jour-là.</p>` + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
       champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle || "", "number", 'min="0" step="0.5" inputmode="decimal"') + prixChamps(l) +
       `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
       () => { modif({ [`foin/livraisons/${id || push(base("foin/livraisons")).key}`]: { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") } }, `a ${id ? "modifié" : "noté"} une livraison de ${balles(parseQte(val("b")))}`, "livraison"); },
@@ -951,6 +1054,8 @@ const actions = {
   },
   pas: (_i, d) => { const e = $("#" + d.c); e.value = fmtQte(Math.max(0, parseQte(e.value) + +d.p)); e.dispatchEvent(new Event("input", { bubbles: true })); },
   chip: (_i, d) => { const e = $("#" + d.c); e.value = d.q; e.dispatchEvent(new Event("input", { bubbles: true })); },
+  basculerRapide: () => { S.rapide = !S.rapide; ecrireLocal("ecurie-rapide", S.rapide ? "1" : "0"); rendre(); },
+  aller: id => { if (id === "foin") S.article = null; S.vue = id; window.scrollTo(0, 0); rendre(); },
   vue: (_id, d) => { S.vue = d.v; window.scrollTo(0, 0); rendre(); },
   filtre: (_id, d) => { S.filtre = d.f; rendre(); },
   annee: (_id, d) => { S.annee += +d.d; rendre(); },
@@ -989,6 +1094,40 @@ const actions = {
     $("#pu").onchange = majPonctuel; majPonctuel();
     document.querySelectorAll("input[name=ty]").forEach(r => r.onchange = () => { if (!id) { const t = TYPES[radio("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; majPonctuel(); } });
   },
+  carnet(id) {
+    const betes = liste(S.foyer.chevaux).filter(c => c.actif !== false).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
+    if (!betes.length) return;
+    const premier = id && S.foyer.chevaux[id] ? id : betes[0].id;
+    const lignes = cid => {
+      const c = S.foyer.chevaux[cid], deja = liste(S.foyer.soins).filter(s => s.chevalId === cid).map(s => s.type);
+      const l = TYPES_CARNET().filter(t => soinPourEspece(t, c.espece) && !deja.includes(t));
+      return l.length ? l.map(t => `<div class="carte-l"><label>${ICONE_SOIN[t] ? ic(ICONE_SOIN[t]) : ""} ${TYPES[t].nom}</label>
+        ${t === "vaccin" ? champ(`cl_${t}`, "Précision (ex. Grippe, Tétanos)", "", "text", 'autocomplete="off"') : ""}
+        ${champ(`cd_${t}`, "Date du dernier passage (d'après le carnet)", "", "date")}
+        <div class="duo"><input id="cn_${t}" type="number" min="1" inputmode="numeric" value="${TYPES[t].n}"><select id="cu_${t}"><option value="sem" ${TYPES[t].unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${TYPES[t].unite === "mois" ? "selected" : ""}>mois</option></select></div>
+        <p class="petit">Périodicité : à répéter tous les… (modifiable).</p></div>`).join("")
+        : `<p class="petit sobre">Tous les soins courants de ${esc(c.nom)} sont déjà suivis.</p>`;
+    };
+    ouvrir("Remplir depuis le carnet",
+      `<p class="petit">Renseigne la date du dernier passage lue dans le carnet. Laisse vide ce que tu ne sais pas.</p><label for="cc">${multi() ? "Animal" : "Cheval"}</label><select id="cc">${options(betes, premier)}</select><div id="cl">${lignes(premier)}</div>
+       <label class="interrupteur"><input type="checkbox" id="csd"><span class="rail"></span>Suivre aussi les soins sans date (à planifier)</label>`,
+      () => {
+        const cid = val("cc"), auj = ajd(), tous = {}; let nb = 0;
+        TYPES_CARNET().forEach(t => {
+          const e = $("#cd_" + t); const sans = $("#csd").checked;
+          if (!e) return;
+          const date = e.value.trim();
+          if (date && date > auj) throw Object.assign(new Error("futur"), { avis: "Une date de passage ne peut pas être à venir : utilise un rendez-vous" });
+          if (!date && !sans) return;
+          const k = push(base("soins")).key, o = { chevalId: cid, type: t, libelle: $("#cl_" + t)?.value.trim() || "", n: +$("#cn_" + t).value || TYPES[t].n, unite: $("#cu_" + t).value, dernier: date, premiere: "", contactId: "", note: "" };
+          if (date) o.passages = { [push(base(`soins/${k}/passages`)).key]: { date, ts: Date.now() } };
+          tous[`soins/${k}`] = o; nb++;
+        });
+        if (!nb) throw Object.assign(new Error("vide"), { avis: "Aucune date renseignée" });
+        modif(tous, `a renseigné le carnet de ${S.foyer.chevaux[cid].nom} (${nb} soin${nb > 1 ? "s" : ""})`, "soin");
+      }, null, [], "Enregistrer");
+    $("#cc").onchange = () => { $("#cl").innerHTML = lignes(val("cc")); };
+  },
   rdvGroupe(_id, d) {
     const type0 = d?.t || "ferrure";
     const candidats = t => soinsPrevus().filter(s => s.type === t && S.foyer.chevaux[s.chevalId].actif !== false).sort((x, y) => S.foyer.chevaux[x.chevalId].nom.localeCompare(S.foyer.chevaux[y.chevalId].nom));
@@ -1008,7 +1147,13 @@ const actions = {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
     ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; modif({ [id ? chemin : `foin/inventaires/${push(base("foin/inventaires")).key}`]: o }, `a ${id ? "modifié le comptage :" : "compté"} ${balles(o.balles)} en stock`, "comptage"); },
+      () => {
+        const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts;
+        const k = id || push(base("foin/inventaires")).key, p0 = !id ? prevision(S.foyer, jour(o.date)) : null, calc = p0 && jour(o.date) > jour(p0.last.date) ? p0.stockAuj : null;
+        modif({ [id ? chemin : `foin/inventaires/${k}`]: o }, `a ${id ? "modifié le comptage :" : "compté"} ${balles(o.balles)} en stock`, "comptage");
+        const f2 = structuredClone(S.foyer); f2.foin ||= {}; if (id === "legacy") f2.foin.inventaire = o; else (f2.foin.inventaires ||= {})[k] = o;
+        setTimeout(() => bilanComptage(f2, o.date, calc), 350);
+      },
       id && (() => modif({ [chemin]: null }, `a supprimé le comptage de ${balles(+i.balles || 0)} (${frCourt(i.date)})`, "comptage")), ["d", "b"]);
   },
   inventaireCopeaux() {
@@ -1020,8 +1165,9 @@ const actions = {
     const f = S.foyer.foin || {};
     ouvrir("Réglages du stock", `<p class="petit">L'accueil passe en alerte quand il reste moins de jours de foin que le seuil. La commande conseillée vise à couvrir la période choisie.</p>` +
       champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"') +
-      champ("cv", "Période à couvrir par une commande (jours)", f.couvertureJours || 90, "number", 'min="7" inputmode="numeric"'),
-      () => { modif({ "foin/seuilJours": +val("s") || 14, "foin/couvertureJours": +val("cv") || 90 }, "a modifié les réglages du stock", "modif"); });
+      champ("cv", "Période à couvrir par une commande (jours)", f.couvertureJours || 90, "number", 'min="7" inputmode="numeric"') +
+      champ("cj", "Me rappeler de compter après (jours sans comptage)", f.comptageJours || 21, "number", 'min="7" inputmode="numeric"'),
+      () => { modif({ "foin/seuilJours": +val("s") || 14, "foin/couvertureJours": +val("cv") || 90, "foin/comptageJours": +val("cj") || 21 }, "a modifié les réglages du stock", "modif"); });
   },
   prenom() {
     ouvrir("Mon prénom", `<p class="petit">Affiché dans l'activité de la famille.</p>` + champ("pr", "Prénom", S.foyer.membres?.[S.user.uid]?.nom || "", "text", 'autocomplete="given-name"'),
@@ -1251,3 +1397,10 @@ document.addEventListener("pointerup", finGeste); document.addEventListener("poi
 
 /* ---------- Installation ---------- */
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); S.install = e; if (S.foyer) rendre(); });
+
+/* ---------- Dernière visite ---------- */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") ecrireLocal("ecurie-vu", String(Date.now()));
+  else { S.vuPrec = +lire("ecurie-vu") || S.vuPrec; if (S.foyer) rendre(); }
+});
+window.addEventListener("pagehide", () => ecrireLocal("ecurie-vu", String(Date.now())));
