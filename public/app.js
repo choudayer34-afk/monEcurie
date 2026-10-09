@@ -90,7 +90,9 @@ const MOTS = () => (multi() ? { pl: "Animaux", actifs: "animaux actifs", actif: 
 const libAnimal = (esp, nom) => (esp === "autre" ? `l'animal ${nom}` : `le ${ESPECES[esp][0].toLowerCase()} ${nom}`);
 const nomCheval = id => S.foyer?.chevaux?.[id]?.nom || "Cheval supprimé";
 const lire = k => { try { return localStorage.getItem(k); } catch { return null; } };
+S.vuPrec = (() => { try { return +localStorage.getItem("ecurie-vu") || null; } catch { return null; } })();
 const ecrireLocal = (k, v) => { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } };
+if (!S.vuPrec) ecrireLocal("ecurie-vu", String(Date.now()));
 const vite = p => Promise.race([Promise.resolve(p), new Promise(r => setTimeout(r, 1200))]); // ne bloque pas l'écran hors réseau
 const vibre = () => navigator.vibrate?.(12);
 const qui = () => S.foyer?.membres?.[S.user.uid]?.nom || (S.user.email.split("@")[0].replace(/^./, c => c.toUpperCase()));
@@ -226,7 +228,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "33", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "34", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -366,10 +368,46 @@ function accueil() {
   if (p && S.stockPrec != null && S.stockPrec - p.stockAuj > 0.05 && S.stockPrec - p.stockAuj < 6) S.ghost = { n: Math.min(3, Math.ceil(S.stockPrec - p.stockAuj - 1e-6)), t: now };
   if (p) S.stockPrec = p.stockAuj;
   const ghost = S.ghost && now - S.ghost.t < 1100 ? { n: S.ghost.n, ecoule: now - S.ghost.t } : null;
-  return hero(p, seuil, ghost) + statistiques(nbC, plan) + (p ? rapide(p) : "") + carteCommande(p) +
+  return hero(p, seuil, ghost) + carteSurveiller() + carteDepuisVisite() + statistiques(nbC, plan) + (p ? rapide(p) : "") + carteCommande(p) +
     (plan.length ? `<div class="carte">${entete("Soins à prévoir", bouton("droite", "vue", 'data-v="soins"', "Tous les soins"))}
       ${urgents.length ? urgents.slice(0, 5).map(ligneSoin).join("") : `<p class="petit sobre">Rien à prévoir dans les 30 jours.</p>`}
       ${urgents.length > 5 ? `<button class="btn sec plein" data-a="vue" data-v="soins">Voir les ${urgents.length} soins</button>` : ""}</div>` : "") + carteStocks() + carteRoutine() + activiteRecente();
+}
+
+/* --- À surveiller (supervision) --- */
+const nbNonSuivis = () => liste(S.foyer.chevaux).filter(c => c.actif !== false).reduce((n, c) => n + TYPES_CARNET().filter(t => soinPourEspece(t, c.espece) && !liste(S.foyer.soins).some(s => s.chevalId === c.id && s.type === t)).length, 0);
+function surveiller() {
+  const auj = aujourdhui(), f = S.foyer.foin || {}, seuil = +f.seuilJours || 14, seuilC = +f.comptageJours || 21, l = [], pl = (k, m, p = m + "s") => (k > 1 ? p : m);
+  const pt = pointFoin(S.foyer, auj);
+  if (!pt) { if (liste(S.foyer.chevaux).length) l.push({ n: 2, i: "blé", t: "Foin : aucun comptage", s: "Compte tes balles pour démarrer le suivi", a: "inventaire" }); }
+  else {
+    const p = pt.p;
+    if (p.historique && p.jours !== null && p.jours <= seuil) l.push({ n: p.jours <= seuil / 2 ? 0 : 1, i: "blé", t: `Foin : ${p.jours} ${pl(p.jours, "jour")} de stock`, s: `Rupture prévue le ${fr(p.rupture)}${pt.aCommander12 ? ` · à commander ≈ ${Math.round(pt.aCommander12)} balles` : ""}`, a: "aller", id: "foin" });
+    if (pt.jDepuis >= seuilC) l.push({ n: 1, i: "check", t: `Comptage de foin ancien : il y a ${pt.jDepuis} jours`, s: "Un nouveau comptage affine la prévision", a: "inventaire" });
+    const liv = pt.aVenir[0]; if (liv && jour(liv.date) - auj <= 14) l.push({ n: 2, i: "blé", t: `Livraison de foin : ${balles(+liv.balles || 0)}`, s: `Prévue ${quand(jour(liv.date) - auj)} (${frCourt(liv.date)})`, a: "livraison", id: liv.id });
+  }
+  const plan = soinsPrevus().filter(s => S.foyer.chevaux[s.chevalId].actif !== false && s.j !== null), noms = g => g.slice(0, 3).map(s => esc(`${libelleSoin(s)} · ${S.foyer.chevaux[s.chevalId].nom}`)).join(", ") + (g.length > 3 ? ` + ${g.length - 3}` : "");
+  const retard = plan.filter(s => s.j < 0), sem = plan.filter(s => s.j >= 0 && s.j <= 7);
+  if (retard.length) l.push({ n: 0, i: "croix", t: `${retard.length} ${pl(retard.length, "soin")} en retard`, s: noms(retard), a: "aller", id: "soins" });
+  if (sem.length) l.push({ n: 1, i: "calendrier", t: `${sem.length} ${pl(sem.length, "soin")} cette semaine`, s: noms(sem), a: "aller", id: "soins" });
+  const ns = nbNonSuivis(); if (ns) l.push({ n: 2, i: "croix", t: `${ns} ${pl(ns, "soin")} non ${pl(ns, "suivi")}`, s: "Renseigne le carnet pour déclencher les rappels", a: "aller", id: "bilan" });
+  articlesListe().forEach(x => { const r = suivi(x, auj); if (etatArticle(x, r).u === "retard") l.push({ n: 0, i: "sac", t: `${x.nom} : à commander`, s: r.nb ? `Environ ${r.jours} jours` : "Stock vide", a: "voirArticle", id: x.id }); });
+  const jr = journalListe(); if (jr.length) { const d0 = Math.floor((Date.now() - jr[0].ts) / 864e5); if (d0 >= 7) l.push({ n: 2, i: "retour", t: `Aucune activité notée depuis ${d0} jours`, s: "Les sorties et les soins ne sont peut-être plus notés", a: "aller", id: "journal" }); }
+  return l.sort((x, y) => x.n - y.n).slice(0, 6);
+}
+function carteSurveiller() {
+  if (!liste(S.foyer.chevaux).length) return "";
+  const l = surveiller();
+  if (!l.length) return `<div class="carte commande ok">${bulle("check", "vert")}<div><b>Tout est à jour</b><div class="petit">Rien d'urgent côté foin, soins et stocks.</div></div></div>`;
+  return `<div class="carte">${entete("À surveiller")}${l.map(x => rangee({ gauche: bulle(x.i, x.n === 0 ? "retard" : x.n === 1 ? "bientot" : "neutre"), titre: x.t, sous: x.s, a: x.a, id: x.id || "" })).join("")}</div>`;
+}
+function carteDepuisVisite() {
+  if (!S.vuPrec) return "";
+  const l = journalListe().filter(j => j.uid && j.uid !== S.user.uid && j.ts > S.vuPrec && !j.annule);
+  if (!l.length) return "";
+  const par = {}; l.forEach(j => { par[j.qui] = (par[j.qui] || 0) + 1; });
+  return `<div class="carte">${entete("Depuis ta dernière visite", bouton("droite", "aller", 'data-id="journal"', "Toute l'activité"))}
+    <p class="petit">${Object.entries(par).map(([q, n]) => `${esc(q)} : ${n} action${n > 1 ? "s" : ""}`).join(" · ")}</p>${l.slice(0, 4).map(j => ligneJournal(j)).join("")}</div>`;
 }
 
 /* --- Activité de la famille --- */
@@ -1003,6 +1041,7 @@ const actions = {
   },
   pas: (_i, d) => { const e = $("#" + d.c); e.value = fmtQte(Math.max(0, parseQte(e.value) + +d.p)); e.dispatchEvent(new Event("input", { bubbles: true })); },
   chip: (_i, d) => { const e = $("#" + d.c); e.value = d.q; e.dispatchEvent(new Event("input", { bubbles: true })); },
+  aller: id => { if (id === "foin") S.article = null; S.vue = id; window.scrollTo(0, 0); rendre(); },
   vue: (_id, d) => { S.vue = d.v; window.scrollTo(0, 0); rendre(); },
   filtre: (_id, d) => { S.filtre = d.f; rendre(); },
   annee: (_id, d) => { S.annee += +d.d; rendre(); },
@@ -1112,8 +1151,9 @@ const actions = {
     const f = S.foyer.foin || {};
     ouvrir("Réglages du stock", `<p class="petit">L'accueil passe en alerte quand il reste moins de jours de foin que le seuil. La commande conseillée vise à couvrir la période choisie.</p>` +
       champ("s", "Alerte quand il reste (jours)", f.seuilJours || 14, "number", 'min="1" inputmode="numeric"') +
-      champ("cv", "Période à couvrir par une commande (jours)", f.couvertureJours || 90, "number", 'min="7" inputmode="numeric"'),
-      () => { modif({ "foin/seuilJours": +val("s") || 14, "foin/couvertureJours": +val("cv") || 90 }, "a modifié les réglages du stock", "modif"); });
+      champ("cv", "Période à couvrir par une commande (jours)", f.couvertureJours || 90, "number", 'min="7" inputmode="numeric"') +
+      champ("cj", "Me rappeler de compter après (jours sans comptage)", f.comptageJours || 21, "number", 'min="7" inputmode="numeric"'),
+      () => { modif({ "foin/seuilJours": +val("s") || 14, "foin/couvertureJours": +val("cv") || 90, "foin/comptageJours": +val("cj") || 21 }, "a modifié les réglages du stock", "modif"); });
   },
   prenom() {
     ouvrir("Mon prénom", `<p class="petit">Affiché dans l'activité de la famille.</p>` + champ("pr", "Prénom", S.foyer.membres?.[S.user.uid]?.nom || "", "text", 'autocomplete="given-name"'),
@@ -1343,3 +1383,10 @@ document.addEventListener("pointerup", finGeste); document.addEventListener("poi
 
 /* ---------- Installation ---------- */
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); S.install = e; if (S.foyer) rendre(); });
+
+/* ---------- Dernière visite ---------- */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") ecrireLocal("ecurie-vu", String(Date.now()));
+  else { S.vuPrec = +lire("ecurie-vu") || S.vuPrec; if (S.foyer) rendre(); }
+});
+window.addEventListener("pagehide", () => ecrireLocal("ecurie-vu", String(Date.now())));
