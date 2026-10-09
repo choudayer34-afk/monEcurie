@@ -1,5 +1,10 @@
 name = "ecurie"
+main = "worker/index.js"
 compatibility_date = "2026-10-01"
 
 [assets]
 directory = "./public"
+binding = "ASSETS"
+
+[triggers]
+crons = ["0 * * * *"]
