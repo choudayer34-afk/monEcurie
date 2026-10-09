@@ -1,6 +1,7 @@
 name = "ecurie"
 main = "worker/index.js"
 compatibility_date = "2026-10-01"
+keep_vars = true
 
 [assets]
 directory = "./public"
