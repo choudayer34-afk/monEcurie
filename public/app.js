@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock } from "./prevision.js";
+import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock, pointFoin } from "./prevision.js";
 import { suivi } from "./stocks.js";
 import { TYPES, libelleSoin, echeance, prochaine, rdvActif, joursAvant, ponctuel, soinPourEspece } from "./soins.js";
 
@@ -226,7 +226,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "31", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "32", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -607,10 +607,10 @@ function courbe() {
   const auj = aujourdhui(), c = courbeStock(S.foyer, auj); if (!c) return "";
   const W = 340, H = 196, gauche = 30, droite = 10, haut = 14, bas = 24, hh = H - haut - bas;
   const ruptures = [c.A?.rupture, c.B?.rupture].filter(Boolean);
-  const proche = !c.A && !c.B ? 60 : Math.min(365, Math.max(60, ...ruptures.map(r => r - c.jAuj + 25), ...(ruptures.length < [c.A, c.B].filter(Boolean).length ? [365] : [0])));
+  const proche = !c.A && !c.B ? 60 : Math.min(365, Math.max(60, ...ruptures.map(r => r - c.jAuj + 25), ...c.livFutures.map(l => l.j - c.jAuj + 20), ...(ruptures.length < [c.A, c.B].filter(Boolean).length ? [365] : [0])));
   const jmin = S.hist ? Math.max(c.hist[0].j, c.jAuj - S.hist) : c.hist[0].j, jmax = c.jAuj + proche;
   const vis = c.hist.filter(h => h.j >= jmin);
-  const maxVu = Math.max(1, ...vis.map(h => h.s), c.sAuj);
+  const maxVu = Math.max(1, ...vis.map(h => h.s), c.sAuj, ...[c.A, c.B].filter(Boolean).flatMap(x => x.pts.filter(q => q.j <= jmax).map(q => q.s)));
   const pas = maxVu <= 12 ? 2 : maxVu <= 30 ? 5 : maxVu <= 60 ? 10 : maxVu <= 120 ? 20 : maxVu <= 300 ? 50 : 100, ymax = Math.ceil(maxVu * 1.08 / pas) * pas;
   const X = j => gauche + (j - jmin) / (jmax - jmin) * (W - gauche - droite), Y = v => haut + hh - Math.min(v, ymax) / ymax * hh;
   const chemin = pts => pts.map((q, i) => `${i ? "L" : "M"}${X(q.j).toFixed(1)} ${Y(q.s).toFixed(1)}`).join("");
@@ -632,6 +632,7 @@ function courbe() {
   if (c.B) svg += `<path d="${chemin(c.B.pts)}" class="cv-b"/>`;
   svg += `<path d="${chemin(vis)}" class="cv-h"/>`;
   c.livraisons.filter(l => l.j >= jmin).forEach(l => { const q = c.hist.find(h => h.j === l.j); if (q) svg += `<circle cx="${X(l.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="4" class="cv-liv"/>`; });
+  c.livFutures.forEach(l => { const q = (c.A || c.B)?.pts.filter(x => x.j === l.j).pop(); if (q) svg += `<circle cx="${X(l.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="4" class="cv-liv"/>`; });
   c.comp.filter(q => q.j >= jmin).forEach(q => { svg += `<circle cx="${X(q.j).toFixed(1)}" cy="${Y(q.s).toFixed(1)}" r="2.800" class="cv-cpt"/>`; });
   [[c.A, "cv-a-t", -9], [c.B, "cv-b-t", -21]].forEach(([pr, cl, dy]) => { if (!pr?.rupture) return; const x = X(pr.rupture), fin = x > W - 52; svg += `<circle cx="${x.toFixed(1)}" cy="${Y(0)}" r="4" class="cv-fin ${cl}"/><text class="val ${cl}" x="${(fin ? x + 4 : x).toFixed(1)}" y="${Y(0) + dy}" text-anchor="${fin ? "end" : "middle"}">${fr(enChaine(pr.rupture)).slice(0, 5)}</text>`; });
   svg += `<line id="cvx" class="cv-croix" y1="${haut}" y2="${haut + hh}" x1="0" x2="0"/>`;
@@ -641,13 +642,13 @@ function courbe() {
     c.A ? `<div class="cv-l"><i class="k a"></i><span>Années précédentes : ${dans(c.A)}</span></div>` : "",
     c.B ? `<div class="cv-l"><i class="k b"></i><span>Consommation actuelle (${taux(c.rateB)} balle/j sur ${c.fenetre} j) : ${dans(c.B)}</span></div>` : "",
     !c.A ? `<p class="petit sobre">La courbe « années précédentes » apparaîtra quand tu auras au moins deux comptages d'écart (idéalement sur une année complète).</p>` : "",
-    c.A || c.B ? `<p class="petit sobre">Projections sans nouvelle livraison.</p>` : (c.A ? "" : `<p class="petit sobre">La projection sur la consommation actuelle apparaîtra après une semaine de sorties notées.</p>`)
+    c.A || c.B ? `<p class="petit sobre">${c.livFutures.length ? "Projections avec les livraisons programmées." : "Projections sans nouvelle livraison."}</p>` : (c.A ? "" : `<p class="petit sobre">La projection sur la consommation actuelle apparaîtra après une semaine de sorties notées.</p>`)
   ].join("");
   const chip = (v, t) => `<button class="chip ${S.hist === v ? "actif" : ""}" data-a="histo" data-h="${v}">${t}</button>`;
   return `<div class="carte cv-carte">${entete("Évolution du stock", `<div class="chips pet">${chip(180, "6 mois")}${chip(365, "1 an")}${chip(0, "Tout")}</div>`)}
     <svg viewBox="0 0 ${W} ${H}" class="courbe" role="img" aria-label="Évolution du stock de foin en balles, avec projections">${svg}</svg>
     <div class="tip" id="cvtip" hidden></div>
-    <div class="legende"><span><i class="l h"></i>Stock</span>${c.A ? `<span><i class="l a"></i>Années préc.</span>` : ""}${c.B ? `<span><i class="l b"></i>Conso actuelle</span>` : ""}${c.livraisons.length ? `<span><i class="pt liv"></i>Livraison</span>` : ""}<span><i class="pt cpt"></i>Comptage</span></div>
+    <div class="legende"><span><i class="l h"></i>Stock</span>${c.A ? `<span><i class="l a"></i>Années préc.</span>` : ""}${c.B ? `<span><i class="l b"></i>Conso actuelle</span>` : ""}${c.livraisons.length || c.livFutures.length ? `<span><i class="pt liv"></i>Livraison</span>` : ""}<span><i class="pt cpt"></i>Comptage</span></div>
     <div class="cv-res">${lignes}</div></div>`;
 }
 document.addEventListener("pointermove", e => {
@@ -687,6 +688,32 @@ function budget() {
     <p class="petit" style="margin-top:8px">${[foinAn ? `Foin ${euro(foinAn).replace(",00", "")}` : "", copAn ? `Copeaux ${euro(copAn).replace(",00", "")}` : "", ballesAn && foinAn ? `${euro(foinAn / ballesAn)} la balle en moyenne` : ""].filter(Boolean).join(" · ")}</p></div>`;
 }
 
+function cartePointFoin() {
+  const auj = aujourdhui(), pt = pointFoin(S.foyer, auj); if (!pt) return "";
+  const { p } = pt, r = pt.rythme, ligne = (a, b) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` });
+  const frais = pt.jDepuis > 21 ? `<span class="q retard">il y a ${pt.jDepuis} jours : recompte pour fiabiliser</span>` : `il y a ${pt.jDepuis} jour${pt.jDepuis > 1 ? "s" : ""}`;
+  const mois = r == null ? null : Math.round(r * 30.4);
+  return `<div class="carte point">${entete("Mon point foin", bouton("check", "inventaire", "", "Nouveau comptage"))}
+    <p class="point-t">Il reste environ <b>${balles(Math.round(p.stockAuj))}</b>${p.rupture && p.jours <= 365 ? `, de quoi tenir jusqu'au <b>${fr(p.rupture)}</b> (${p.jours} jour${p.jours > 1 ? "s" : ""})` : p.rupture ? ", de quoi tenir plus d'un an" : p.historique ? " et aucune rupture n'est prévue" : ""}.</p>
+    <div class="chiffres">${chiffre(r == null ? "–" : taux(r), "balles/jour")}${chiffre(mois == null ? "–" : mois, "balles/mois")}${chiffre(pt.depuis == null ? "–" : taux(pt.depuis), "sorties notées")}</div>
+    <p class="petit">Dernier comptage le ${fr(pt.last.date)} (${frais}).</p>
+    ${pt.besoin12 == null ? `<p class="petit sobre">Le besoin sur 12 mois apparaît après deux comptages.</p>` : `<h3 class="groupe">Sur 12 mois</h3>
+      ${ligne("Besoin prévu", `≈ ${Math.round(pt.besoin12)} balles`)}${ligne("En stock aujourd'hui", `≈ ${Math.round(p.stockAuj)} balles`)}
+      ${pt.stockAVenir ? ligne("Livraisons programmées", `${Math.round(pt.stockAVenir)} balles`) : ""}${ligne("<b>À commander pour tenir 12 mois</b>", `<b>≈ ${Math.round(pt.aCommander12)} balles</b>`)}
+      ${pt.jours12 >= 300 ? ligne("Consommé sur les 12 derniers mois", `≈ ${Math.round(pt.conso12)} balles`) : ""}`}
+    ${pt.aVenir.length ? `<h3 class="groupe">Livraisons programmées</h3>${pt.aVenir.map(l => rangee({ gauche: bulle("blé", "or"), a: "livraison", id: l.id, titre: `${balles(+l.balles || 0)} <span class="date">${frCourt(l.date)}</span>`, sous: "Touche pour modifier" })).join("")}` : ""}</div>`;
+}
+function bilanComptage(f2, date, calcule) {
+  const auj = Math.max(aujourdhui(), jour(date)), pt = pointFoin(f2, auj); if (!pt) return;
+  const { p } = pt, per = periodes(f2).find(x => x.au === date), ecart = calcule == null ? null : Math.round((p.last.date === date ? +p.last.balles || 0 : 0) - calcule);
+  const l = [];
+  if (ecart !== null) l.push(Math.abs(ecart) < 2 ? `Le calcul annonçait ≈ ${Math.round(calcule)} balles : c'est cohérent.` : `Le calcul annonçait ≈ ${Math.round(calcule)} balles, soit ${ecart > 0 ? "+" : "−"}${Math.abs(ecart)} d'écart : ${ecart > 0 ? "une livraison non notée ?" : "des sorties non notées ?"}`);
+  if (per) l.push(per.conso < 0 ? "Consommation incohérente depuis le comptage précédent : une livraison oubliée ?" : `Depuis le comptage du ${fr(per.du)} : <b>${balles(Math.round(per.conso * 10) / 10)}</b> consommées en ${per.jours} jours (${taux(per.rate)} par jour).`);
+  l.push(p.rupture && p.jours > 365 ? "À ce rythme, tu tiens plus d'un an." : p.rupture ? `À ce rythme, tu tiens jusqu'au <b>${fr(p.rupture)}</b> (${p.jours} jour${p.jours > 1 ? "s" : ""}).` : p.historique ? "Aucune rupture prévue." : "La prévision apparaîtra après deux comptages.");
+  if (pt.besoin12 != null) l.push(`Sur 12 mois : besoin ≈ <b>${Math.round(pt.besoin12)} balles</b>, à commander ≈ <b>${Math.round(pt.aCommander12)} balles</b>${pt.stockAVenir ? ` (livraisons programmées déduites)` : ""}.`);
+  ouvrir("Résultat du comptage", `<p>Comptage enregistré : <b>${balles(+p.last.balles || 0)}</b> le ${fr(date)}.</p>${l.map(x => `<p>${x}</p>`).join("")}`, () => {}, null, [], "Fermer");
+}
+
 function foin() {
   if (S.article && !S.foyer.stocks?.[S.article]) S.article = null;
   return selecteurStock() + (S.article ? articleVue(S.article) : foinVue());
@@ -700,9 +727,9 @@ function foinVue() {
   const nomC = id => esc(S.foyer.contacts?.[id]?.nom || "");
   const lignesLiv = (l, a) => l.map(x => rangee({
     gauche: bulle(a === "livraison" ? "blé" : "sapin", "or"), a, id: x.id, titre: `${balles(+x.balles || 0)} <span class="date">${frCourt(x.date)}</span>`,
-    sous: [x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
+    sous: [jour(x.date) > aujourdhui() ? "<b>Programmée</b>" : "", x.poidsBalle ? `${x.poidsBalle} kg/balle (≈ ${Math.round(x.balles * x.poidsBalle)} kg)` : "", infoPrix(x), nomC(x.contactId), esc(x.note || "")].filter(Boolean).join(" · ")
   })).join("");
-  return courbe() + graphique() + budget() +
+  return cartePointFoin() + courbe() + graphique() + budget() +
     `<div class="carte">${entete("Comptages du foin", bouton("reglage", "params", "", "Seuil d'alerte") + bouton("plus", "inventaire", "", "Nouveau comptage"))}
       ${cs.length ? cs.map(c => { const p = per[c.id]; return rangee({
         gauche: bulle("check", "vert"), a: "inventaire", id: c.id, titre: `${balles(+c.balles || 0)} <span class="date">${frCourt(c.date)}</span>`,
@@ -917,7 +944,7 @@ const actions = {
   livraison(id) {
     const l = id ? S.foyer.foin.livraisons[id] : { date: ajd() };
     ouvrir(id ? "Modifier la livraison" : "Livraison de foin",
-      champ("d", "Date", l.date, "date") + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
+      champ("d", "Date", l.date, "date") + `<p class="petit">Une date à venir programme la livraison : le stock et la prévision l'intègrent ce jour-là.</p>` + qte("b", "Nombre de balles", l.balles === undefined ? "" : fmtQte(l.balles)) +
       champ("p", "Poids moyen d'une balle (kg, facultatif)", l.poidsBalle || "", "number", 'min="0" step="0.5" inputmode="decimal"') + prixChamps(l) +
       `<label for="c">Fournisseur</label><select id="c"><option value="">—</option>${options(liste(S.foyer.contacts), l.contactId)}</select>` + champ("no", "Note", l.note),
       () => { modif({ [`foin/livraisons/${id || push(base("foin/livraisons")).key}`]: { date: val("d"), balles: parseQte(val("b")), poidsBalle: +val("p") || 0, prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") } }, `a ${id ? "modifié" : "noté"} une livraison de ${balles(parseQte(val("b")))}`, "livraison"); },
@@ -1008,7 +1035,13 @@ const actions = {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
     ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
-      () => { const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts; modif({ [id ? chemin : `foin/inventaires/${push(base("foin/inventaires")).key}`]: o }, `a ${id ? "modifié le comptage :" : "compté"} ${balles(o.balles)} en stock`, "comptage"); },
+      () => {
+        const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts;
+        const k = id || push(base("foin/inventaires")).key, p0 = !id ? prevision(S.foyer, jour(o.date)) : null, calc = p0 && jour(o.date) > jour(p0.last.date) ? p0.stockAuj : null;
+        modif({ [id ? chemin : `foin/inventaires/${k}`]: o }, `a ${id ? "modifié le comptage :" : "compté"} ${balles(o.balles)} en stock`, "comptage");
+        const f2 = structuredClone(S.foyer); f2.foin ||= {}; if (id === "legacy") f2.foin.inventaire = o; else (f2.foin.inventaires ||= {})[k] = o;
+        setTimeout(() => bilanComptage(f2, o.date, calc), 350);
+      },
       id && (() => modif({ [chemin]: null }, `a supprimé le comptage de ${balles(+i.balles || 0)} (${frCourt(i.date)})`, "comptage")), ["d", "b"]);
   },
   inventaireCopeaux() {

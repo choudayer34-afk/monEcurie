@@ -137,7 +137,7 @@ export function courbeStock(f, auj) {
     hist.push({ j, s: Math.max(0, s) });
   }
   const fin = hist[hist.length - 1], sAuj = fin.s, jAuj = fin.j;
-  const proj = (rateDe) => { const pts = [{ j: jAuj, s: sAuj }]; let v = sAuj, rupture = null; for (let i = 1; i <= 366; i++) { const j = jAuj + i; v -= rateDe(j); if (v <= 0) { pts.push({ j, s: 0 }); rupture = j; break; } pts.push({ j, s: v }); } return { pts, rupture }; };
+  const proj = (rateDe) => { const pts = [{ j: jAuj, s: sAuj }]; let v = sAuj, rupture = null; for (let i = 1; i <= 366; i++) { const j = jAuj + i; if (livs[j]) pts.push({ j, s: Math.max(0, v) }); v += (livs[j] || 0) - rateDe(j); if (v <= 0) { pts.push({ j, s: 0 }); rupture = j; break; } pts.push({ j, s: v }); } return { pts, rupture }; };
   const A = historique && sAuj > 0 ? proj(j => taux(new Date(j * 864e5).getUTCMonth())) : null;
   // Consommation actuelle : moyenne des 30 derniers jours (au moins 7 jours d'historique)
   const idx = Object.fromEntries(hist.map(h => [h.j, h.s])), W = Math.min(30, jAuj - hist[0].j);
@@ -147,5 +147,26 @@ export function courbeStock(f, auj) {
     rateB = ((idx[jAuj - W] ?? hist[0].s) + liv - sAuj) / W;
     if (rateB > 0.005) B = proj(() => rateB); else rateB = null;
   }
-  return { hist, comp, livraisons: Object.entries(livs).map(([j, n]) => ({ j: +j, n })).filter(l => l.j >= hist[0].j && l.j <= jAuj), A, B, rateB, fenetre: W, sAuj, jAuj, taux };
+  return { hist, comp, livraisons: Object.entries(livs).map(([j, n]) => ({ j: +j, n })).filter(l => l.j >= hist[0].j && l.j <= jAuj), A, B, rateB, fenetre: W, sAuj, jAuj, taux, livFutures: Object.entries(livs).map(([j, n]) => ({ j: +j, n })).filter(l => l.j > jAuj) };
+}
+
+// Point foin : situation, rythme, besoin sur 12 mois et livraisons programmées
+export function pointFoin(f, auj) {
+  const cs = comptages(f); if (!cs.length) return null;
+  const p = prevision(f, auj), last = cs[cs.length - 1], lj = jour(last.date);
+  const aVenir = liste(f.foin?.livraisons).filter(l => l.date && jour(l.date) > auj).sort((a, b) => a.date.localeCompare(b.date));
+  const stockAVenir = aVenir.reduce((s, l) => s + (+l.balles || 0), 0);
+  let conso12 = 0, jours12 = 0; const deb = auj - 365;
+  for (const x of periodes(f)) {
+    if (x.conso < 0) continue;
+    const a = Math.max(jour(x.du), deb), b = Math.min(jour(x.au), auj); if (b <= a) continue;
+    conso12 += x.conso * ((b - a) / x.jours); jours12 += b - a;
+  }
+  const jDepuis = Math.max(0, auj - lj);
+  if (p.reel && jDepuis > 0) { conso12 += p.sorties; jours12 += jDepuis; }
+  const rythme = jours12 > 0 ? conso12 / jours12 : null, besoin12 = consoPrevue(f, auj, 365);
+  return {
+    p, last, jDepuis, depuis: p.reel ? p.sorties : null, rythme, jours12, conso12, besoin12, aVenir, stockAVenir,
+    aCommander12: besoin12 == null ? null : Math.max(0, besoin12 - p.stockAuj - stockAVenir)
+  };
 }
