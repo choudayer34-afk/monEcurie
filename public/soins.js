@@ -5,8 +5,14 @@ export const TYPES = {
   vaccin: { nom: "Vaccin", n: 6, unite: "mois" },
   vermifuge: { nom: "Vermifuge", n: 3, unite: "mois" },
   dentiste: { nom: "Dentiste", n: 12, unite: "mois" },
-  ferrure: { nom: "Ferrure", n: 8, unite: "sem" }
+  ferrure: { nom: "Ferrure", n: 8, unite: "sem" },
+  antiparasitaire: { nom: "Antiparasitaire", n: 1, unite: "mois" },
+  autre: { nom: "Autre soin", n: 1, unite: "once" }
 };
+// Soins réservés à certaines espèces (tous les autres concernent tous les animaux)
+export const ESPECES_SOIN = { ferrure: ["cheval"], dentiste: ["cheval"] };
+export const soinPourEspece = (type, espece) => !ESPECES_SOIN[type] || ESPECES_SOIN[type].includes(espece || "cheval");
+export const ponctuel = s => s.unite === "once";
 
 export const libelleSoin = s => (TYPES[s.type]?.nom || "Soin") + (s.libelle ? " · " + s.libelle : "");
 
@@ -21,6 +27,7 @@ export function ajouter(date, n, unite) {
 
 // Prochaine échéance : dernier passage + périodicité, sinon la date de première échéance saisie
 export function echeance(s) {
+  if (ponctuel(s)) return s.dernier ? null : s.premiere || null; // soin ponctuel : plus d'échéance une fois fait
   if (s.dernier) return ajouter(s.dernier, +s.n || 1, s.unite || "mois");
   return s.premiere || null;
 }

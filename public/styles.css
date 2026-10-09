@@ -307,3 +307,32 @@ circle.cv-fin.cv-a-t{fill:var(--or)}circle.cv-fin.cv-b-t{fill:var(--bleu)}
 .legende i.pt.liv{background:var(--or)}.legende i.pt.cpt{border:2px solid var(--prim);background:var(--carte)}
 .cv-res{margin-top:10px;display:flex;flex-direction:column;gap:6px}.cv-l{font-size:.88rem;line-height:1.4}
 .rangee.annule .corps{text-decoration:line-through;opacity:.55}
+.liste-coches{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px}
+.liste-coches[hidden]{display:none}
+.coche{display:flex;align-items:center;gap:8px;margin:0;padding:10px 14px;border-radius:14px;background:var(--bg2);border:1px solid var(--bord);font-weight:600;color:var(--txt)}
+.coche input{width:20px;height:20px;accent-color:var(--prim);margin:0}
+.coche input[type=checkbox]{appearance:auto;-webkit-appearance:checkbox;width:20px;height:20px;min-height:0;padding:0;border:0;background:none;border-radius:4px;flex:none}
+.chips.pet .chip.actif{background:var(--prim);color:#fff;border-color:var(--prim)}
+/* Sacs */
+.pile.sacs{gap:5px}
+.sac{width:24px;height:28px;flex:none}
+.sac .sp{fill:#eabb4c;stroke:#a8741c;stroke-width:1}.sac .ss{fill:none;stroke:#a8741c;stroke-width:1.200;stroke-linecap:round;opacity:.8}
+.sac.entame .sp{fill:#eabb4c66}
+/* Pastille d'espèce sur l'avatar */
+.av-w{position:relative;display:inline-flex;flex:none}
+.av-esp{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;border-radius:50%;background:var(--carte);border:1px solid var(--bord);color:var(--prim-t);display:flex;align-items:center;justify-content:center}
+.av-esp svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.av-esp.grand{width:30px;height:30px;right:0;bottom:0}.av-esp.grand svg{width:18px;height:18px}
+
+.notif-det{border-top:1px solid var(--bord);margin:4px 0 8px}
+.notif-det summary{cursor:pointer;font-weight:600;padding:10px 0;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.notif-det summary::-webkit-details-marker{display:none}
+.notif-det summary::after{content:"+";font-weight:400;opacity:.6}
+.notif-det[open] summary::after{content:"−"}
+
+.notif-canal{border-top:1px solid var(--bord);padding:12px 0 4px;margin-top:8px}
+.notif-canal .entete-c{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.notif-canal a.btn{display:flex;align-items:center;justify-content:center;text-decoration:none}
+.notif-det ol{margin:4px 0 10px 18px;padding:0}
+
+.liens-ntfy{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
