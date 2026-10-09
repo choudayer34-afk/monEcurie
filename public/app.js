@@ -229,7 +229,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "35", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "36", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -256,7 +256,7 @@ function admin() {
     <div class="carte petit">Aucune clé ni aucun secret n'est stocké dans l'application : les accès passent par ton compte sur chaque service.</div>`;
 }
 const vues = { plus, routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin, bilan: bilanSante };
-const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Santé", foin: "Stocks", plus: "Plus", contacts: "Contacts", reglages: "Foyer et notifications", journal: "Activité", admin: "Administration", routine: "Routine", bilan: "Bilan santé" };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Santé", foin: "Stocks", plus: "Plus", contacts: "Contacts", reglages: "Foyer", journal: "Activité", admin: "Administration", routine: "Routine", bilan: "Bilan santé" };
 
 const ONGLET = v => (v === "fiche" || v === "routine" ? "chevaux" : v === "bilan" ? "soins" : ["contacts", "reglages", "journal", "admin"].includes(v) ? "plus" : v);
 function rendre() {
@@ -280,7 +280,7 @@ function rendre() {
     plus: "Contacts, activité, réglages",
     foin: "Foin, copeaux et autres stocks",
     contacts: "Fournisseurs et soignants",
-    reglages: "Partage, notifications et compte",
+    reglages: "Partage et notifications",
     journal: "Ce que fait la famille",
     admin: "Services et diagnostic",
     routine: "Consignes du matin et du soir",
@@ -442,6 +442,11 @@ function journal() {
   return html + `</div>`;
 }
 
+/* --- Onglets internes --- */
+const segment = (actif, l) => `<div class="segment" role="tablist">${l.map(([v, t]) => `<button role="tab" aria-selected="${v === actif}" class="${v === actif ? "actif" : ""}" data-a="vue" data-v="${v}">${t}</button>`).join("")}</div>`;
+const segSante = a => segment(a, [["soins", "À faire"], ["bilan", "Par animal"]]);
+const segAnimaux = a => segment(a, [["chevaux", "Fiches"], ["routine", "Routine"]]);
+
 /* --- Soins --- */
 function soinsPrevus() {
   const auj = aujourdhui();
@@ -464,7 +469,7 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips passe">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + `<button class="btn sec plein" style="margin-bottom:10px" data-a="vue" data-v="bilan">${ic("croix")} Bilan santé : où en est chaque animal</button>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return segSante("soins") + `<div class="chips passe">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
 }
 
@@ -486,7 +491,7 @@ function bilanSante() {
     return `<div class="carte">${entete(`<span class="nom-bilan">${avatarC(c)} ${esc(c.nom)}</span>`, `<button class="btn sec petit-b" data-a="carnet" data-id="${c.id}">${ic("plus")} Carnet</button>`)}${lignes.join("")}</div>`;
   });
   const tuile = (v, l, c = "") => `<div class="stat ${c}"><b>${v}</b><span>${l}</span></div>`;
-  return `<div class="chips"><button class="chip" data-a="vue" data-v="soins">${ic("gauche")} Santé</button></div>
+  return segSante("bilan") + `
     ${betes.length ? `<div class="stats">${tuile(n.retard, "en retard", n.retard ? "alerte-t" : "")}${tuile(n.bientot, "sous 30 jours")}${tuile(n.non, "non suivis")}</div>` : ""}
     ${n.non ? `<p class="petit astuce">Les soins « non suivis » ne déclenchent aucun rappel : renseigne la date du dernier passage d'après le carnet pour les suivre.</p>` : ""}
     ${cartes.join("") || vide("fer", "Ajoute d'abord un animal.")}`;
@@ -496,7 +501,7 @@ function bilanSante() {
 function chevaux() {
   const l = liste(S.foyer.chevaux).sort((a, b) => (b.actif !== false) - (a.actif !== false) || (a.nom || "").localeCompare(b.nom || ""));
   const plan = soinsPrevus();
-  return (l.length ? `<div class="carte liste">${l.map(c => {
+  return segAnimaux("chevaux") + (l.length ? `<div class="carte liste">${l.map(c => {
     const prochain = plan.find(s => s.chevalId === c.id && s.j !== null);
     return rangee({
       gauche: avatarC(c), classe: c.actif === false ? "inactif" : "", a: "fiche", id: c.id, titre: esc(c.nom),
@@ -504,7 +509,6 @@ function chevaux() {
       droite: prochain ? `<span class="badge ${urgence(prochain.j)}">${ic(ICONE_SOIN[prochain.type])}${quand(prochain.j)}</span>` : `<span class="chev">${ic("droite")}</span>`
     });
   }).join("")}</div>` : vide("fer", "Ajoute ton premier animal.", `<button class="btn" data-a="cheval">${ic("plus")} Ajouter un animal</button>`)) +
-    `<button class="btn sec plein" data-a="vue" data-v="routine">${ic("soleil")} Routine du matin et du soir</button>` +
     `<button class="fab" data-a="cheval" aria-label="Ajouter un animal" title="Ajouter un animal">${ic("plus")}</button>`;
 }
 
@@ -546,7 +550,7 @@ function routine() {
   const bloc = m => { const l = routineListe(m);
     return `<div class="carte">${entete(`${MOMENTS[m][0]}`, `<button class="btn sec petit-b" data-a="routineEdit" data-m="${m}">${ic("plus")} Ligne</button>`)}
       ${l.length ? l.map(r => ligneRoutine(r, true, true)).join("") : `<p class="petit sobre">Rien de prévu le ${MOMENTS[m][0].toLowerCase()}.</p>`}</div>`; };
-  return `<div class="chips"><button class="chip" data-a="vue" data-v="chevaux">${ic("gauche")} ${MOTS().pl}</button></div>` + bloc("matin") + bloc("soir") +
+  return segAnimaux("routine") + bloc("matin") + bloc("soir") +
     `<p class="petit astuce">Ce sont des consignes : rien à valider. Elles s'affichent sur l'accueil et sur la fiche de chaque cheval concerné.</p>`;
 }
 function carteRoutine() {
@@ -905,7 +909,7 @@ function carteNotifs() {
       <p class="petit">Stocks : au passage du seuil d'alerte, puis chaque semaine. Heure et choix propres à cet appareil.</p>`;
   }
   return `<div class="carte">${entete("Notifications")}<p class="petit">Reçois les soins à prévoir et les alertes de stock, même application fermée.</p>${guide}
-    ${ligne("Dans l'application", web ? "activé" : "", webC)}${ligne("Avec ntfy", nt ? "activé" : "", ntfyC)}${reglages}</div>`;
+    ${ligne("Dans l'application", web ? "activé" : "", webC)}${nt || (!web && S.det?.ntfy) ? ligne("Avec ntfy", nt ? "activé" : "", ntfyC) : bloc("ntfy", "Ça ne marche pas ? Autre méthode (ntfy)", ligne("Avec ntfy", "", ntfyC))}${reglages}</div>`;
 }
 async function retirerNotif() {
   try { const reg = await navigator.serviceWorker.ready; await (await reg.pushManager.getSubscription())?.unsubscribe(); } catch { /* rien */ }

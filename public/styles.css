@@ -354,3 +354,7 @@ nav .lib{font-size:.66rem;font-weight:600;line-height:1}
 .pile-r .tas{width:34px;height:23px}
 .pile-r .legende-h{display:none}
 .chips.passe{flex-wrap:wrap;overflow:visible}
+
+.segment{display:flex;gap:4px;padding:4px;margin-bottom:12px;background:var(--bg2);border-radius:16px}
+.segment button{flex:1;min-height:40px;border:0;border-radius:12px;background:none;color:var(--doux);font-weight:700;font-size:.95rem}
+.segment button.actif{background:var(--carte);color:var(--txt);box-shadow:0 1px 4px #0002}
