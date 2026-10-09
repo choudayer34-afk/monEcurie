@@ -1,6 +1,6 @@
 // Rappels quotidiens : soins à prévoir et stocks bas, envoyés à chaque appareil à l'heure choisie.
 import { firebaseConfig } from "../public/firebase-config.js";
-import { jour, enChaine, liste, prevision } from "../public/prevision.js";
+import { jour, enChaine, liste, prevision, comptages } from "../public/prevision.js";
 import { prochaine, rdvActif, libelleSoin } from "../public/soins.js";
 import { suivi } from "../public/stocks.js";
 import { envoyer } from "./push.js";
@@ -57,6 +57,11 @@ export function composer(f, n, auj) {
     const p = prevision(f, auj);
     const livJour = n.sansStocks?.foin ? [] : liste(f.foin?.livraisons).filter(l => l.date === enChaine(auj));
     if (livJour.length) { lignes.push(`Livraison de foin prévue aujourd'hui : ${livJour.reduce((s, l) => s + (+l.balles || 0), 0)} balles`); stocksOk = true; }
+    const cs = comptages(f), seuilC = +f.foin?.comptageJours || 21;
+    if (cs.length && !n.sansStocks?.foin) {
+      const anc = auj - jour(cs[cs.length - 1].date);
+      if (anc >= seuilC && (anc - seuilC) % 7 === 0) { lignes.push(`Foin : aucun comptage depuis ${anc} jours`); stocksOk = true; }
+    }
     if (p && !n.sansStocks?.foin && alerteStock(p.jours, +f.foin?.seuilJours || 14, auj)) { lignes.push(`Foin : ${duree(p.jours)}, pense à commander`); stocksOk = true; }
     liste(f.stocks).filter(x => x.actif !== false && !n.sansStocks?.[x.id]).forEach(x => {
       const r = suivi(x, auj);
