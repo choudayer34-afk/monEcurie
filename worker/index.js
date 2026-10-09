@@ -1,34 +1,15 @@
-// Cloudflare Worker : rappel quotidien par e-mail quand le stock de foin passe sous le seuil.
-// Variables à définir : FIREBASE_DB_URL, FIREBASE_SECRET (secret), RESEND_API_KEY (secret), EXPEDITEUR
-import { prevision } from "./prevision.js";
-const liste = o => Object.values(o || {});
+// Worker « ecurie » : sert l'application (dossier public) et envoie les rappels par notification.
+// Variables : VAPID_PUBLIC (variable), VAPID_PRIVATE et FIREBASE_SECRET (secrets) — jamais dans le code.
+import { lancer, test } from "./rappels.js";
 
-function joursRestants(f, auj) {
-  return prevision(f, auj)?.jours ?? null;
-}
-
-async function run(env) {
-  const r = await fetch(`${env.FIREBASE_DB_URL}/foyers.json?auth=${env.FIREBASE_SECRET}`);
-  const foyers = (await r.json()) || {};
-  const auj = Math.floor(Date.now() / 864e5);
-  for (const f of Object.values(foyers)) {
-    const j = joursRestants(f, auj), seuil = +(f.foin?.seuilJours) || 14;
-    if (j === null || j > seuil) continue;
-    const dest = liste(f.membres).map(m => m.email).filter(Boolean);
-    if (!dest.length) continue;
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: env.EXPEDITEUR, to: dest,
-        subject: `Foin : il reste ${j} jour(s) de stock`,
-        text: `Foyer « ${f.nom} » : le stock de foin sera épuisé dans ${j} jour(s). Pense à passer commande.`
-      })
-    });
-  }
-}
+const json = (o, code = 200) => new Response(JSON.stringify(o), { status: code, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
 export default {
-  scheduled: (_e, env, ctx) => ctx.waitUntil(run(env)),
-  fetch: async (_r, env) => { await run(env); return new Response("ok"); }
+  scheduled: (_e, env, ctx) => ctx.waitUntil(lancer(env)),
+  async fetch(req, env) {
+    const u = new URL(req.url);
+    if (u.pathname === "/api/cle") return json({ cle: env.VAPID_PUBLIC || null });
+    if (u.pathname === "/api/test" && req.method === "POST") { const { code, ...r } = await test(req, env); return json(r, code); }
+    return env.ASSETS.fetch(req);
+  }
 };
