@@ -32,4 +32,8 @@ export function echeance(s) {
   return s.premiere || null;
 }
 
+// Date retenue : le rendez-vous pris s'il existe (et n'est pas déjà réglé par un passage noté), sinon l'échéance calculée
+export const rdvActif = s => !!(s.rdv && !(s.dernier && s.dernier >= s.rdv));
+export const prochaine = s => (rdvActif(s) && !(ponctuel(s) && s.dernier) ? s.rdv : echeance(s));
+
 export const joursAvant = (ech, auj) => (ech ? jour(ech) - auj : null);

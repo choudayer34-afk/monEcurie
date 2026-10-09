@@ -6,7 +6,7 @@ import { getDatabase, ref, get, set, push, update, onValue }
 import { firebaseConfig } from "./firebase-config.js";
 import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock } from "./prevision.js";
 import { suivi } from "./stocks.js";
-import { TYPES, libelleSoin, echeance, joursAvant, ponctuel, soinPourEspece } from "./soins.js";
+import { TYPES, libelleSoin, echeance, prochaine, rdvActif, joursAvant, ponctuel, soinPourEspece } from "./soins.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -226,7 +226,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "28", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "29", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -404,7 +404,7 @@ function journal() {
 function soinsPrevus() {
   const auj = aujourdhui();
   return liste(S.foyer.soins).filter(s => S.foyer.chevaux?.[s.chevalId] && !(ponctuel(s) && s.dernier))
-    .map(s => { const ech = echeance(s); return { ...s, ech, j: joursAvant(ech, auj) }; })
+    .map(s => { const ech = prochaine(s); return { ...s, ech, rdvOk: rdvActif(s), theo: echeance(s), j: joursAvant(ech, auj) }; })
     .sort((x, y) => (x.ech === null) - (y.ech === null) || (x.ech || "").localeCompare(y.ech || ""));
 }
 const urgence = j => (j === null ? "neutre" : j < 0 ? "retard" : j <= 30 ? "bientot" : "ok");
@@ -412,7 +412,7 @@ function ligneSoin(s, avecCheval = true) {
   return `<div class="glisse"><div class="fond">${ic("check")} Fait</div>` + rangee({
     gauche: bulle(ICONE_SOIN[s.type] || "croix", urgence(s.j)), classe: `u-${urgence(s.j)}`, a: "soin", id: s.id,
     titre: `${esc(libelleSoin(s))}${avecCheval ? " · " + esc(S.foyer.chevaux[s.chevalId].nom) : ""}`,
-    sous: s.j === null ? "À planifier" : `<span class="q ${urgence(s.j)}">${quand(s.j)}</span> · ${frCourt(s.ech)}${ponctuel(s) ? " · ponctuel" : s.dernier ? ` · fait le ${frCourt(s.dernier)}` : ""}`,
+    sous: s.j === null ? "À planifier" : `<span class="q ${urgence(s.j)}">${quand(s.j)}</span> · ${s.rdvOk ? "RDV " : ""}${frCourt(s.ech)}${s.rdvOk && s.theo && s.theo !== s.ech ? ` · échéance ${frCourt(s.theo)}` : ""}${ponctuel(s) ? " · ponctuel" : s.dernier ? ` · fait le ${frCourt(s.dernier)}` : ""}`,
     droite: `<button class="fait" data-a="soinFait" data-id="${s.id}" aria-label="Marquer comme fait" title="Fait aujourd'hui">${ic("check")}</button>`
   }) + `</div>`;
 }
@@ -957,7 +957,7 @@ const actions = {
   soinFait(id) {
     const s = S.foyer.soins[id], jr = ajd();
     vibre();
-    const cle = modif({ [`soins/${id}/dernier`]: jr, [`soins/${id}/passages/${push(base(`soins/${id}/passages`)).key}`]: { date: jr, ts: Date.now() } }, `a noté ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin");
+    const cle = modif({ [`soins/${id}/dernier`]: jr, ...(s.rdv ? { [`soins/${id}/rdv`]: null } : {}), [`soins/${id}/passages/${push(base(`soins/${id}/passages`)).key}`]: { date: jr, ts: Date.now() } }, `a noté ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin");
     toast(ponctuel(s) ? `${esc(libelleSoin(s))} fait` : `${esc(libelleSoin(s))} noté, prochain ${fr(echeance({ ...s, dernier: jr }))}`, () => annulerEntree(cle));
   },
   soin(id, d) {
@@ -969,9 +969,10 @@ const actions = {
       champ("li", "Précision (ex. Grippe, Tétanos)", s.libelle) +
       `<label>Périodicité : tous les</label><div class="duo"><input id="pn" type="number" min="1" inputmode="numeric" value="${s.n || 1}"><select id="pu"><option value="sem" ${s.unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${s.unite !== "sem" && s.unite !== "once" ? "selected" : ""}>mois</option><option value="once" ${s.unite === "once" ? "selected" : ""}>Aucune (soin ponctuel)</option></select></div>` +
       `<div class="duo">${champ("de", "Dernier passage", s.dernier, "date")}${champ("pr", "1re échéance", s.premiere, "date")}</div><p class="petit" id="aidePr">La 1re échéance sert tant qu'aucun passage n'est noté.</p>` +
+      `<div id="blocRv">${champ("rv", "Rendez-vous pris (facultatif)", s.rdv, "date")}<p class="petit">Si un rendez-vous est fixé, il remplace la date calculée dans la liste et les rappels, jusqu'à ce que le soin soit noté fait.</p></div>` +
       `<label for="co">Intervenant</label><select id="co"><option value="">—</option>${options(liste(S.foyer.contacts), s.contactId, c => `${esc(c.nom)} (${esc(c.role || "")})`)}</select>` + champ("no", "Note", s.note),
       async () => {
-        const uni = val("pu"), o = { type: radio("ty"), libelle: val("li"), n: +val("pn") || 1, unite: uni, dernier: uni === "once" ? (s.unite === "once" ? s.dernier || "" : "") : val("de"), premiere: val("pr"), contactId: val("co"), note: val("no") };
+        const uni = val("pu"), o = { type: radio("ty"), libelle: val("li"), n: +val("pn") || 1, unite: uni, dernier: uni === "once" ? (s.unite === "once" ? s.dernier || "" : "") : val("de"), premiere: val("pr"), rdv: uni === "once" ? null : (val("rv") || null), contactId: val("co"), note: val("no") };
         const lib = x => `${libelleSoin(o)} · ${nomCheval(x)}`;
         if (id) { modif(Object.fromEntries(Object.entries({ ...o, chevalId: val("ch") }).map(([k, v]) => [`soins/${id}/${k}`, v])), `a modifié ${lib(val("ch"))}`, "soin"); return; }
         const cibles = val("ch") === "*" ? chev.filter(c => c.actif !== false && soinPourEspece(radio("ty"), c.espece)).map(c => c.id) : [val("ch")];
@@ -981,7 +982,7 @@ const actions = {
       id && (() => modif({ [`soins/${id}`]: null }, `a supprimé ${libelleSoin(s)} · ${nomCheval(s.chevalId)}`, "soin")));
     const majPonctuel = () => {
       const p = $("#pu").value === "once";
-      $("#pn").hidden = p; $("#pu").parentElement.style.gridTemplateColumns = p ? "1fr" : ""; $("#de").closest(".champ").hidden = p;
+      $("#pn").hidden = p; $("#pu").parentElement.style.gridTemplateColumns = p ? "1fr" : ""; $("#de").closest(".champ").hidden = p; $("#blocRv").hidden = p;
       $("#pr").closest(".champ").querySelector("label").textContent = p ? "Date prévue" : "1re échéance";
       $("#aidePr").textContent = p ? "Le soin disparaît des échéances une fois fait et reste dans l'historique." : "La 1re échéance sert tant qu'aucun passage n'est noté.";
     };
@@ -1020,7 +1021,7 @@ const actions = {
     const ev = soinsPrevus().filter(x => x.ech).map(x => {
       const d = x.ech.replace(/-/g, ""), fin = enChaine(jour(x.ech) + 1).replace(/-/g, "");
       return ["BEGIN:VEVENT", `UID:${x.id}@ecurie`, `DTSTAMP:${st}`, `DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${fin}`,
-        `SUMMARY:${txt(libelleSoin(x) + " · " + S.foyer.chevaux[x.chevalId].nom)}`, "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Soin à prévoir", "TRIGGER:-P7D", "END:VALARM", "END:VEVENT"].join("\r\n");
+        `SUMMARY:${txt((x.rdvOk ? "RDV " : "") + libelleSoin(x) + " · " + S.foyer.chevaux[x.chevalId].nom)}`, "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Soin à prévoir", "TRIGGER:-P7D", "END:VALARM", "END:VEVENT"].join("\r\n");
     });
     if (!ev.length) return toast("Aucune échéance à exporter");
     const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Ecurie//FR", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Écurie", ...ev, "END:VCALENDAR"].join("\r\n");
