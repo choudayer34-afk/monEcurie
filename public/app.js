@@ -226,7 +226,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "32", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "33", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -252,14 +252,14 @@ function admin() {
         .map(([a, b]) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` })).join("")}</div>
     <div class="carte petit">Aucune clé ni aucun secret n'est stocké dans l'application : les accès passent par ton compte sur chaque service.</div>`;
 }
-const vues = { routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin };
-const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité", admin: "Administration", routine: "Routine" };
+const vues = { routine, accueil, chevaux, soins, foin, contacts, reglages, journal, fiche, admin, bilan: bilanSante };
+const TITRES = { accueil: "Accueil", chevaux: "Chevaux",  soins: "Soins", foin: "Stock", contacts: "Contacts", reglages: "Foyer", journal: "Activité", admin: "Administration", routine: "Routine", bilan: "Bilan santé" };
 
 function rendre() {
   if (!S.foyer) return;
   if (S.vue === "admin" && !estAdmin()) S.vue = "reglages";
   if (S.vue === "fiche" && !S.foyer.chevaux?.[S.cheval]) S.vue = "chevaux";
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" || S.vue === "routine" ? "chevaux" : S.vue)));
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("actif", b.dataset.v === (S.vue === "fiche" || S.vue === "routine" ? "chevaux" : S.vue === "bilan" ? "soins" : S.vue)));
   const nbC = liste(S.foyer.chevaux).filter(c => c.actif !== false).length;
   const nbSoins = soinsPrevus().filter(x => S.foyer.chevaux[x.chevalId].actif !== false && x.j !== null && x.j <= 0).length;
   const bs = document.querySelector("nav button[data-v=soins]");
@@ -279,6 +279,7 @@ function rendre() {
     journal: "Ce que fait la famille",
     admin: "Services et diagnostic",
     routine: "Consignes du matin et du soir",
+    bilan: "Où en est chaque animal",
     fiche: "Fiche du cheval"
   }[S.vue];
   if (S.vue === "fiche") { const e = espece(S.foyer.chevaux[S.cheval]); $("#sous").textContent = e === "autre" ? "Fiche de l'animal" : `Fiche du ${ESPECES[e][0].toLowerCase()}`; }
@@ -422,8 +423,32 @@ function soins() {
     .map(([k, t, i]) => `<button class="chip ${S.filtre === k ? "actif" : ""}" data-a="filtre" data-f="${k}">${i ? ic(i) : ""}${t}</button>`).join("");
   const groupes = [["En retard", s => s.j !== null && s.j < 0], ["Dans les 30 jours", s => s.j !== null && s.j >= 0 && s.j <= 30], ["Plus tard", s => s.j !== null && s.j > 30], ["À planifier", s => s.j === null]];
   const blocs = groupes.map(([t, f]) => { const g = l.filter(f); return g.length ? `<h3 class="groupe">${t} <span>${g.length}</span></h3><div class="carte liste">${g.map(ligneSoin).join("")}</div>` : ""; }).join("");
-  return `<div class="chips">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
+  return `<div class="chips">${chips}</div>` + (tous.length ? `<div class="duo actions-soins"><button class="btn sec" data-a="rdvGroupe" data-t="${S.filtre === "tous" ? "" : S.filtre}">${ic("calendrier")} RDV groupé</button>${tous.some(x => x.ech) ? `<button class="btn sec" data-a="agenda">${ic("calendrier")} Agenda</button>` : ""}</div>` : "") + `<button class="btn sec plein" style="margin-bottom:10px" data-a="vue" data-v="bilan">${ic("croix")} Bilan santé : où en est chaque animal</button>` + (tous.length ? `<p class="petit astuce">Astuce : glisse une ligne vers la droite pour la valider.</p>` : "") + (blocs || vide("croix", "Aucun soin suivi pour l'instant.", `<button class="btn" data-a="soin">${ic("plus")} Ajouter un soin</button>`)) +
     `<button class="fab" data-a="soin" aria-label="Ajouter un soin" title="Ajouter un soin">${ic("plus")}</button>`;
+}
+
+/* --- Bilan santé --- */
+const TYPES_CARNET = () => Object.keys(TYPES).filter(t => t !== "autre");
+function bilanSante() {
+  const betes = liste(S.foyer.chevaux).filter(c => c.actif !== false).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
+  const plan = soinsPrevus(), n = { retard: 0, bientot: 0, ok: 0, non: 0 };
+  const cartes = betes.map(c => {
+    const mes = plan.filter(s => s.chevalId === c.id);
+    const lignes = mes.map(s => {
+      const u = urgence(s.j); if (s.j !== null) n[u === "retard" ? "retard" : u === "bientot" ? "bientot" : "ok"]++;
+      return rangee({ gauche: bulle(ICONE_SOIN[s.type] || "croix", u), a: "soin", id: s.id, titre: esc(libelleSoin(s)),
+        sous: ponctuel(s) ? `Ponctuel · ${s.ech ? frCourt(s.ech) : "à planifier"}` : `${s.dernier ? "Fait le " + frCourt(s.dernier) : "Jamais noté"} · ${s.rdvOk ? "RDV " : "prochain "}${s.ech ? frCourt(s.ech) : "à planifier"}`,
+        droite: s.j === null ? `<span class="badge neutre">À planifier</span>` : `<span class="badge ${u}">${quand(s.j)}</span>` });
+    });
+    const manquants = TYPES_CARNET().filter(t => soinPourEspece(t, c.espece) && !liste(S.foyer.soins).some(s => s.chevalId === c.id && s.type === t));
+    manquants.forEach(t => { n.non++; lignes.push(rangee({ gauche: bulle(ICONE_SOIN[t] || "croix", "neutre"), a: "carnet", id: c.id, titre: TYPES[t].nom, sous: "Non suivi : touche pour renseigner", droite: `<span class="badge neutre">?</span>` })); });
+    return `<div class="carte">${entete(`<span class="nom-bilan">${avatarC(c)} ${esc(c.nom)}</span>`, `<button class="btn sec petit-b" data-a="carnet" data-id="${c.id}">${ic("plus")} Carnet</button>`)}${lignes.join("")}</div>`;
+  });
+  const tuile = (v, l, c = "") => `<div class="stat ${c}"><b>${v}</b><span>${l}</span></div>`;
+  return `<div class="chips"><button class="chip" data-a="vue" data-v="soins">${ic("gauche")} Soins</button></div>
+    ${betes.length ? `<div class="stats">${tuile(n.retard, "en retard", n.retard ? "alerte-t" : "")}${tuile(n.bientot, "sous 30 jours")}${tuile(n.non, "non suivis")}</div>` : ""}
+    ${n.non ? `<p class="petit astuce">Les soins « non suivis » ne déclenchent aucun rappel : renseigne la date du dernier passage d'après le carnet pour les suivre.</p>` : ""}
+    ${cartes.join("") || vide("fer", "Ajoute d'abord un animal.")}`;
 }
 
 /* --- Chevaux --- */
@@ -1015,6 +1040,40 @@ const actions = {
     };
     $("#pu").onchange = majPonctuel; majPonctuel();
     document.querySelectorAll("input[name=ty]").forEach(r => r.onchange = () => { if (!id) { const t = TYPES[radio("ty")]; $("#pn").value = t.n; $("#pu").value = t.unite; majPonctuel(); } });
+  },
+  carnet(id) {
+    const betes = liste(S.foyer.chevaux).filter(c => c.actif !== false).sort((x, y) => (x.nom || "").localeCompare(y.nom || ""));
+    if (!betes.length) return;
+    const premier = id && S.foyer.chevaux[id] ? id : betes[0].id;
+    const lignes = cid => {
+      const c = S.foyer.chevaux[cid], deja = liste(S.foyer.soins).filter(s => s.chevalId === cid).map(s => s.type);
+      const l = TYPES_CARNET().filter(t => soinPourEspece(t, c.espece) && !deja.includes(t));
+      return l.length ? l.map(t => `<div class="carte-l"><label>${ICONE_SOIN[t] ? ic(ICONE_SOIN[t]) : ""} ${TYPES[t].nom}</label>
+        ${t === "vaccin" ? champ(`cl_${t}`, "Précision (ex. Grippe, Tétanos)", "", "text", 'autocomplete="off"') : ""}
+        ${champ(`cd_${t}`, "Date du dernier passage (d'après le carnet)", "", "date")}
+        <div class="duo"><input id="cn_${t}" type="number" min="1" inputmode="numeric" value="${TYPES[t].n}"><select id="cu_${t}"><option value="sem" ${TYPES[t].unite === "sem" ? "selected" : ""}>semaines</option><option value="mois" ${TYPES[t].unite === "mois" ? "selected" : ""}>mois</option></select></div>
+        <p class="petit">Périodicité : à répéter tous les… (modifiable).</p></div>`).join("")
+        : `<p class="petit sobre">Tous les soins courants de ${esc(c.nom)} sont déjà suivis.</p>`;
+    };
+    ouvrir("Remplir depuis le carnet",
+      `<p class="petit">Renseigne la date du dernier passage lue dans le carnet. Laisse vide ce que tu ne sais pas.</p><label for="cc">${multi() ? "Animal" : "Cheval"}</label><select id="cc">${options(betes, premier)}</select><div id="cl">${lignes(premier)}</div>
+       <label class="interrupteur"><input type="checkbox" id="csd"><span class="rail"></span>Suivre aussi les soins sans date (à planifier)</label>`,
+      () => {
+        const cid = val("cc"), auj = ajd(), tous = {}; let nb = 0;
+        TYPES_CARNET().forEach(t => {
+          const e = $("#cd_" + t); const sans = $("#csd").checked;
+          if (!e) return;
+          const date = e.value.trim();
+          if (date && date > auj) throw Object.assign(new Error("futur"), { avis: "Une date de passage ne peut pas être à venir : utilise un rendez-vous" });
+          if (!date && !sans) return;
+          const k = push(base("soins")).key, o = { chevalId: cid, type: t, libelle: $("#cl_" + t)?.value.trim() || "", n: +$("#cn_" + t).value || TYPES[t].n, unite: $("#cu_" + t).value, dernier: date, premiere: "", contactId: "", note: "" };
+          if (date) o.passages = { [push(base(`soins/${k}/passages`)).key]: { date, ts: Date.now() } };
+          tous[`soins/${k}`] = o; nb++;
+        });
+        if (!nb) throw Object.assign(new Error("vide"), { avis: "Aucune date renseignée" });
+        modif(tous, `a renseigné le carnet de ${S.foyer.chevaux[cid].nom} (${nb} soin${nb > 1 ? "s" : ""})`, "soin");
+      }, null, [], "Enregistrer");
+    $("#cc").onchange = () => { $("#cl").innerHTML = lignes(val("cc")); };
   },
   rdvGroupe(_id, d) {
     const type0 = d?.t || "ferrure";

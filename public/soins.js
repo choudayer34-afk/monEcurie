@@ -2,7 +2,7 @@
 import { jour, enChaine } from "./prevision.js";
 
 export const TYPES = {
-  vaccin: { nom: "Vaccin", n: 6, unite: "mois" },
+  vaccin: { nom: "Vaccin", n: 12, unite: "mois" },
   vermifuge: { nom: "Vermifuge", n: 3, unite: "mois" },
   dentiste: { nom: "Dentiste", n: 12, unite: "mois" },
   ferrure: { nom: "Ferrure", n: 8, unite: "sem" },
