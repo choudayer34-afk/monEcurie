@@ -369,3 +369,4 @@ nav .lib{font-size:.66rem;font-weight:600;line-height:1}
 .actions-soins .btn{white-space:nowrap;font-size:.9rem}.actions-soins .btn .ic{display:none}
 #foyerNom{max-width:32vw}
 .sync{width:20px}.h-droite{gap:6px}#foyerNom{max-width:28vw}
+.btn.gros{min-height:56px;font-size:1.1rem}

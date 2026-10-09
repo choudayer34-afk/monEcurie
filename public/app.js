@@ -247,7 +247,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "37", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "38", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -332,6 +332,12 @@ function majStock(p) {
   return `<p class="hero-m">Calculé depuis le comptage du <b>${fr(d)}</b> (${fmtQte(+p.last.balles || 0)})${dern}${so.length > 1 ? ` (${so.length} sorties)` : ""}${liv}</p>`;
 }
 const auj_ch = enChaine;
+function derniereEntamee() {
+  const f = S.foyer.foin || {}, auj = aujourdhui(), l = liste(f.sorties).filter(x => x.date && x.date <= enChaine(auj)).sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.ts || 0) - (a.ts || 0));
+  if (!l.length) return `<p class="hero-m">Aucune balle notée : touche le bouton à chaque balle entamée.</p>`;
+  const j = auj - jour(l[0].date), nb = l.filter(x => x.date === l[0].date).reduce((t, x) => t + (+x.balles || 0), 0);
+  return `<p class="hero-m">Dernière sortie : ${j <= 0 ? "aujourd'hui" : j === 1 ? "hier" : `il y a ${j} jours`} (${balles(nb)})</p>`;
+}
 function hero(p, seuil, g, court = false) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
     <p class="hero-s">Compte tes balles pour démarrer le suivi du stock.</p><button class="btn or" data-a="inventaire">Premier comptage</button></section>`;
@@ -344,7 +350,7 @@ function hero(p, seuil, g, court = false) {
       <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
       <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
     : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div>`}
-  ${court ? `<div class="pile-r">${pile(p.stockAuj, g)}</div><button class="btn or plein" data-a="inventaire">${ic("check")} Faire le point</button>` : pile(p.stockAuj, g) + majStock(p)}
+  ${court ? `<div class="pile-r">${pile(p.stockAuj, g)}</div>${derniereEntamee()}<button class="btn or plein gros" data-a="entamer">${ic("plus")} J'entame une balle</button><button class="btn sec plein" style="margin-top:8px" data-a="inventaire">${ic("check")} Faire le point (comptage)</button>` : pile(p.stockAuj, g) + majStock(p)}
   </section>`;
 }
 
@@ -1058,6 +1064,7 @@ const actions = {
       id && (() => modif({ [`copeaux/livraisons/${id}`]: null }, `a supprimé la livraison de ${balles(+l.balles || 0)} de copeaux (${frCourt(l.date)})`, "copeaux")), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
   },
+  entamer: () => noterSortie(1, ajd(), "a entamé une balle"),
   retirer(_id, d) {
     if (d?.q && d.q !== "autre") return noterSortie(parseQte(d.q));
     ouvrir("Retirer du stock", qte("b", "Quantité retirée (balles)", "", ["1/4", "1/3", "1/2", "2/3", "1", "2"]) + champ("d", "Date", ajd(), "date"),
