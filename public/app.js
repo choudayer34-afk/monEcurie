@@ -226,6 +226,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
+const VERSION = "28", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -245,7 +246,7 @@ function admin() {
       <p class="petit">À faire une seule fois. La clé privée n'est conservée nulle part : copie-la tout de suite dans Cloudflare (secret VAPID_PRIVATE), et la clé publique dans la variable VAPID_PUBLIC. Générer de nouvelles clés oblige chacun à réactiver les notifications.</p>
       <button class="btn sec" data-a="genererCles">${ic("fer")} Générer une paire de clés</button><div id="cles"></div></div>
     <div class="carte">${entete("Diagnostic du foyer")}
-      ${[["Compte", esc(S.user.email)], ["Identifiant", esc(S.user.uid)], ["Foyer", esc(f.nom || "")], ["Membres", nb(f.membres)], ["Chevaux", nb(f.chevaux)], ["Contacts", nb(f.contacts)], ["Soins", nb(f.soins)],
+      ${[["Version", `${VERSION} · ${fr(DATE_VERSION)}`], ["Compte", esc(S.user.email)], ["Identifiant", esc(S.user.uid)], ["Foyer", esc(f.nom || "")], ["Membres", nb(f.membres)], ["Chevaux", nb(f.chevaux)], ["Contacts", nb(f.contacts)], ["Soins", nb(f.soins)],
         ["Comptages de foin", nb(f.foin?.inventaires)], ["Livraisons de foin", nb(f.foin?.livraisons)], ["Sorties de foin", nb(f.foin?.sorties)], ["Entrées d'activité", nb(f.journal)],
         ["Dernière activité", dern ? new Date(dern).toLocaleString("fr-FR") : "—"], ["Connexion", $("#hors").hidden ? "En ligne" : "Hors ligne"]]
         .map(([a, b]) => rangee({ gauche: "", titre: a, droite: `<span class="petit">${b}</span>` })).join("")}</div>
@@ -739,7 +740,8 @@ function reglages() {
     <button class="btn sec plein" data-a="vue" data-v="journal">${ic("retour")} Activité et annulations</button>
     ${estAdmin() ? `<button class="btn sec plein" data-a="vue" data-v="admin">${ic("fer")} Administration</button>` : ""}
     <button class="btn sec plein" data-a="intro">Revoir la présentation</button>
-    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>`;
+    <button class="btn sec plein" data-a="sortie">${ic("sortie")} Se déconnecter</button>
+    <p class="petit centre version">Écurie · version ${VERSION} · ${fr(DATE_VERSION)}</p>`;
 }
 
 /* ---------- Notifications ---------- */

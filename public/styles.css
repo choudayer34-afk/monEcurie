@@ -336,3 +336,5 @@ circle.cv-fin.cv-a-t{fill:var(--or)}circle.cv-fin.cv-b-t{fill:var(--bleu)}
 .notif-det ol{margin:4px 0 10px 18px;padding:0}
 
 .liens-ntfy{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+
+.version{margin:16px 0 8px;opacity:.7;text-align:center}
