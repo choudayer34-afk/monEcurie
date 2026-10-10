@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getDatabase, ref, get, set, push, update, onValue }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock, pointFoin } from "./prevision.js";
+import { DELAI_SAISIE, explicationEstimation, jour, enChaine, liste, sortieApres, comptages, periodes, prevision, consoMensuelle, consoPrevue, depensesMensuelles, courbeStock, pointFoin } from "./prevision.js";
 import { suivi } from "./stocks.js";
 import { TYPES, libelleSoin, echeance, prochaine, rdvActif, joursAvant, ponctuel, soinPourEspece } from "./soins.js";
 
@@ -247,7 +247,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "38", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "43", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -332,11 +332,18 @@ function majStock(p) {
   return `<p class="hero-m">Calculé depuis le comptage du <b>${fr(d)}</b> (${fmtQte(+p.last.balles || 0)})${dern}${so.length > 1 ? ` (${so.length} sorties)` : ""}${liv}</p>`;
 }
 const auj_ch = enChaine;
-function derniereEntamee() {
-  const f = S.foyer.foin || {}, auj = aujourdhui(), l = liste(f.sorties).filter(x => x.date && x.date <= enChaine(auj)).sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.ts || 0) - (a.ts || 0));
-  if (!l.length) return `<p class="hero-m">Aucune balle notée : touche le bouton à chaque balle entamée.</p>`;
-  const j = auj - jour(l[0].date), nb = l.filter(x => x.date === l[0].date).reduce((t, x) => t + (+x.balles || 0), 0);
-  return `<p class="hero-m">Dernière sortie : ${j <= 0 ? "aujourd'hui" : j === 1 ? "hier" : `il y a ${j} jours`} (${balles(nb)})</p>`;
+function resumeFoin(p) {
+  const f = S.foyer.foin || {}, auj = aujourdhui(), fin = enChaine(auj), d = fr(p.last.date), r2 = x => Math.round(x * 100) / 100;
+  const l = liste(f.sorties).filter(x => x.date && x.date <= fin && sortieApres(x, p.last)).sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.ts || 0) - (a.ts || 0));
+  const liv = liste(f.livraisons).filter(x => x.date > p.last.date && x.date <= fin).reduce((t, x) => t + (+x.balles || 0), 0);
+  const ent = l.reduce((t, x) => t + (+x.balles || 0), 0), cpt = +p.last.balles || 0, saisi = Math.max(0, cpt + liv - ent);
+  const j = l.length ? auj - jour(l[0].date) : null;
+  const der = l.length ? ` Dernière balle entamée : ${j <= 0 ? "aujourd'hui" : j === 1 ? "hier" : `il y a ${j} jours`}.` : "";
+  const detail = `comptage du ${d} (${fmtQte(cpt)})${liv ? ` + ${fmtQte(liv)} livrées` : ""} − ${fmtQte(r2(ent))} entamée${ent > 1 ? "s" : ""}`;
+  const conso = Math.max(0, cpt + liv - p.stockAuj);
+  const aide = `<button class="info-i" data-a="aideEstimation" aria-label="Comment l'estimation est calculée" title="Comment l'estimation est calculée">i</button>`;
+  return `<p class="src">${aide} Stock d'après tes saisies : <b>${balles(r2(saisi))}</b><br><span class="petit-s">${detail}${l.length ? ` (${l.length} appui${l.length > 1 ? "s" : ""})` : ""}.${der}</span></p>` +
+    (p.reel ? (p.jEstim ? `<p class="src">Le stock affiché ci-dessus (<b>≈ ${balles(Math.round(p.stockAuj * 10) / 10)}</b>) ajoute une estimation de <b>≈ ${fmtQte(Math.round(p.estim * 10) / 10)}</b> pour ${p.jEstim} jour${p.jEstim > 1 ? "s" : ""} sans saisie (au-delà de ${DELAI_SAISIE} jours). Un appui sur « J'entame une balle » remet la main à ta saisie.</p>` : `<p class="src">Le stock affiché ci-dessus est ce calcul.</p>`) : `<p class="src">Le stock affiché ci-dessus (<b>≈ ${balles(Math.round(p.stockAuj * 10) / 10)}</b>) est une estimation automatique : consommation estimée ≈ ${fmtQte(Math.round(conso * 10) / 10)}. Dès que tu notes une balle entamée, ton calcul prend le relais.</p>`);
 }
 function hero(p, seuil, g, court = false) {
   if (!p) return `<section class="hero"><div class="hero-t">${ic("blé")}<span>Foin</span></div><div class="hero-n">Aucun comptage</div>
@@ -350,7 +357,7 @@ function hero(p, seuil, g, court = false) {
       <p class="hero-s">${p.rupture ? `Rupture prévue le <b>${fr(p.rupture)}</b>` : "Aucune rupture prévue"} · environ <b>${balles(p.stockAuj)}</b></p>
       <div class="jauge"><i style="width:${pct}%"></i><b style="left:25%" title="Seuil d'alerte"></b></div>`
     : `<div class="hero-n">${fmtQte(p.stockAuj)}<small> balles</small></div>`}
-  ${court ? `<div class="pile-r">${pile(p.stockAuj, g)}</div>${derniereEntamee()}<button class="btn or plein gros" data-a="entamer">${ic("plus")} J'entame une balle</button><button class="btn sec plein" style="margin-top:8px" data-a="inventaire">${ic("check")} Faire le point (comptage)</button>` : pile(p.stockAuj, g) + majStock(p)}
+  ${court ? `<div class="pile-r">${pile(p.stockAuj, g)}</div>${resumeFoin(p)}<button class="btn or plein gros" data-a="entamer">${ic("plus")} J'entame une balle</button>${p.reel ? "" : `<p class="src bas-b">Remplace l'estimation : rien n'est décompté en plus.</p>`}<button class="btn sec plein" style="margin-top:8px" data-a="inventaire">${ic("check")} Faire le point (comptage)</button>` : pile(p.stockAuj, g) + majStock(p)}
   </section>`;
 }
 
@@ -379,7 +386,7 @@ function statistiques(nbC, plan) {
 
 function rapide(p) {
   const reste = p.stockAuj - Math.floor(p.stockAuj + 1e-6);
-  const entamee = p.reel && reste > 0.01 && reste < 0.99
+  const entamee = p.reel && !p.jEstim && reste > 0.01 && reste < 0.99
     ? `<button class="btn or plein" data-a="finirBalle">${ic("check")} Balle entamée finie <small>(reste ${fmtQte(reste)})</small></button>` : "";
   const tuiles = [["1", "1"], ["1/2", "½"], ["1/3", "⅓"], ["1/4", "¼"]].map(([q, t]) => `<button class="tuile" data-a="retirer" data-q="${q}"><b>− ${t}</b><span>balle</span></button>`).join("");
   return `<div class="carte">${entete("Sortie rapide", bouton("reglage", "params", "", "Seuil d'alerte"))}
@@ -1063,6 +1070,22 @@ const actions = {
       () => { modif({ [`copeaux/livraisons/${id || push(base("copeaux/livraisons")).key}`]: { date: val("d"), balles: parseQte(val("b")), prixBalle: num(val("pb")), prixTotal: num(val("pt")), contactId: val("c"), note: val("no") } }, `a ${id ? "modifié" : "noté"} une livraison de ${balles(parseQte(val("b")))} de copeaux`, "copeaux"); },
       id && (() => modif({ [`copeaux/livraisons/${id}`]: null }, `a supprimé la livraison de ${balles(+l.balles || 0)} de copeaux (${frCourt(l.date)})`, "copeaux")), ["d", "b"]);
     lierPrix(l.prixTotal ? "pt" : "pb");
+  },
+  aideEstimation() {
+    const e = explicationEstimation(S.foyer, aujourdhui()), mois = new Date(2026, e.mois, 1).toLocaleDateString("fr-FR", { month: "long" }), r = x => (Math.round(x * 100) / 100).toLocaleString("fr-FR");
+    const src = { saison: `Le rythme de <b>${mois}</b> vient de tes comptages (années : ${e.annees.join(", ")}) : ${e.joursMois} jours observés.`, saison1: `Le rythme de <b>${mois}</b> vient de tes comptages de ${e.annees[0]} : ${e.joursMois} jours observés. Avec une seule année, il peut être peu représentatif.`, notes: `Le rythme de <b>${mois}</b> ne vient que de tes balles notées (${e.joursNotes} jours).`, moyenne: `Aucune donnée pour <b>${mois}</b> : l'application utilise ton rythme moyen sur toute la période suivie.` }[e.source];
+    const fiab = e.joursMois >= 60 && e.annees.length > 1 ? "Bonne : plusieurs années pour cette saison" : e.joursMois >= 20 ? "Moyenne : une seule saison observée" : "Faible : peu de données pour cette saison";
+    ouvrir("Comment le stock est estimé",
+      `<div class="aide-est"><p><b>Ce que l'application utilise, du plus fiable au moins fiable</b></p>
+        <ol><li><b>Tes balles notées</b> (bouton « J'entame une balle ») : c'est du réel, il prime toujours.</li>
+          <li><b>Le rythme de la même saison</b>, calculé sur tes comptages passés : la consommation de chaque mois est la moyenne des jours observés ce mois-là, toutes années confondues.</li>
+          <li><b>Ton rythme moyen</b> sur toute la période, si le mois n'a jamais été observé.</li></ol>
+        <p><b>Quand l'estimation intervient</b></p>
+        <ul><li>Tant qu'aucune balle n'est notée depuis le dernier comptage.</li><li>Ou quand tu restes plus de ${e.delai} jours sans rien noter : elle complète alors les jours manquants.</li></ul>
+        <p><b>Aujourd'hui</b></p>
+        <ul><li>Rythme utilisé : <b>${e.historique ? `${r(e.taux)} balle/jour (≈ ${Math.round(e.taux * 30.4)} par mois)` : "aucun, il faut au moins 2 comptages"}</b></li><li>${e.historique ? src : "Fais un 2e comptage pour démarrer les prévisions."}</li><li>Fiabilité : ${e.historique ? fiab : "—"}</li></ul>
+        <p class="petit">Un comptage reste la référence : il remet tout à zéro et améliore le rythme des mois suivants.</p></div>`,
+      () => {}, null, [], "Compris");
   },
   entamer: () => noterSortie(1, ajd(), "a entamé une balle"),
   retirer(_id, d) {

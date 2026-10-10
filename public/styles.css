@@ -370,3 +370,7 @@ nav .lib{font-size:.66rem;font-weight:600;line-height:1}
 #foyerNom{max-width:32vw}
 .sync{width:20px}.h-droite{gap:6px}#foyerNom{max-width:28vw}
 .btn.gros{min-height:56px;font-size:1.1rem}
+.src{font-size:.8rem;line-height:1.35;opacity:.92;margin:10px 0 8px}.bas-b{margin:6px 0 4px;text-align:center;opacity:.8}
+.petit-s{font-size:.76rem;opacity:.85}
+.info-i{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1.5px solid #ffffffcc;background:#ffffff26;color:#fff;font:700 .8rem/1 Georgia,serif;font-style:italic;padding:0;margin-right:6px;vertical-align:middle}
+.aide-est ol,.aide-est ul{padding-left:20px;margin:6px 0 12px}.aide-est li{margin-bottom:6px}

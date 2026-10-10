@@ -24,6 +24,7 @@ export function periodes(f) {
 }
 
 // Une sortie compte si elle est datée après le comptage, ou le même jour mais saisie après lui
+export const DELAI_SAISIE = 3; // jours sans saisie avant que l'estimation reprenne
 export const sortieApres = (s, c) => { const j = jour(s.date), lj = jour(c.date); return j > lj || (j === lj && (+s.ts || 0) > (+c.ts || 0)); };
 
 // Consommation par mois (clé AAAA-MM) : réelle entre comptages, puis sorties notées depuis le dernier comptage
@@ -52,17 +53,21 @@ export function prevision(f, auj) {
   liste(f.foin?.sorties).filter(s => sortieApres(s, last)).forEach(s => { const j = jour(s.date); { sort[j] = (sort[j] || 0) + (+s.balles || 0); nbSort++; if (j <= auj) totSort += +s.balles || 0; } });
   const reel = nbSort > 0;
   const { historique, taux } = tauxMois(f);
-  let stock = (+last.balles || 0) - (lj <= auj ? (sort[lj] || 0) : 0), stockAuj = lj >= auj ? stock : null, rupture = null;
+  let stock = (+last.balles || 0) - (lj <= auj ? (sort[lj] || 0) : 0), stockAuj = lj >= auj ? stock : null, rupture = null, ref = lj, estim = 0, jEstim = 0;
   for (let i = 0; i < 1500; i++) {
     const j = lj + 1 + i;
-    const conso = reel && j <= auj ? (sort[j] || 0) : (historique ? taux(new Date(j * 864e5).getUTCMonth()) : 0);
+    if (sort[j] && j <= auj) ref = j;
+    const est = historique ? taux(new Date(j * 864e5).getUTCMonth()) : 0;
+    const reprise = reel && j <= auj && !sort[j] && j - ref > DELAI_SAISIE;
+    if (reprise) { estim += est; jEstim++; }
+    const conso = reel && j <= auj ? (sort[j] || (reprise ? est : 0)) : est;
     stock += (livs[j] || 0) - conso;
     if (stock < 0) { rupture = j; if (stockAuj === null) stockAuj = 0; break; }
     if (j === auj) stockAuj = stock;
   }
   if (stockAuj === null) stockAuj = stock;
   return {
-    stockAuj, historique, last, sorties: totSort, reel,
+    stockAuj, historique, last, sorties: totSort, reel, estim, jEstim,
     rupture: historique && rupture ? enChaine(rupture) : null,
     jours: historique && rupture ? Math.max(0, rupture - auj) : null
   };
@@ -70,10 +75,10 @@ export function prevision(f, auj) {
 
 // Taux de consommation par jour, mois par mois, d'après les comptages passés
 function tauxMois(f) {
-  const sum = Array(12).fill(0), n = Array(12).fill(0); let tot = 0, totN = 0;
+  const sum = Array(12).fill(0), n = Array(12).fill(0), ans = Array.from({ length: 12 }, () => new Set()), notes = Array(12).fill(0); let tot = 0, totN = 0;
   for (const p of periodes(f)) {
     if (p.conso < 0) continue;
-    for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += p.rate; n[m]++; tot += p.rate; totN++; }
+    for (let j = jour(p.du) + 1; j <= jour(p.au); j++) { const dd = new Date(j * 864e5), m = dd.getUTCMonth(); sum[m] += p.rate; n[m]++; ans[m].add(dd.getUTCFullYear()); tot += p.rate; totN++; }
   }
   const historique = totN > 0; // historique réel : au moins deux comptages d'écart
   // Consommation réelle notée depuis le dernier comptage (jour par jour, jusqu'à la dernière sortie)
@@ -82,10 +87,10 @@ function tauxMois(f) {
     const last = cs[cs.length - 1], lj = jour(last.date), sort = {};
     liste(f.foin?.sorties).filter(s => sortieApres(s, last)).forEach(s => { const j = jour(s.date); sort[j] = (sort[j] || 0) + (+s.balles || 0); });
     const js = Object.keys(sort).map(Number);
-    if (js.length) for (let j = lj + 1; j <= Math.max(...js); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += sort[j] || 0; n[m]++; tot += sort[j] || 0; totN++; }
+    if (js.length) for (let j = lj + 1; j <= Math.max(...js); j++) { const m = new Date(j * 864e5).getUTCMonth(); sum[m] += sort[j] || 0; n[m]++; if (sort[j]) notes[m]++; tot += sort[j] || 0; totN++; }
   }
   const moy = totN ? tot / totN : 0;
-  return { historique, taux: m => (n[m] ? sum[m] / n[m] : moy) };
+  return { historique, taux: m => (n[m] ? sum[m] / n[m] : moy), n, ans, notes, moy };
 }
 
 // Balles à prévoir sur les N prochains jours (null s'il n'y a pas encore d'historique)
@@ -130,10 +135,12 @@ export function courbeStock(f, auj) {
   }
   const sort = {}; liste(f.foin?.sorties).filter(x => sortieApres(x, last)).forEach(x => { const j = jour(x.date); sort[j] = (sort[j] || 0) + (+x.balles || 0); });
   const reel = Object.keys(sort).length > 0;
-  let s = comp[comp.length - 1].s - (lj <= auj ? (sort[lj] || 0) : 0);
+  let s = comp[comp.length - 1].s - (lj <= auj ? (sort[lj] || 0) : 0), ref = lj;
   hist[hist.length - 1] = { j: lj, s: Math.max(0, s) };
   for (let j = lj + 1; j <= auj; j++) {
-    s += (livs[j] || 0) - (reel ? (sort[j] || 0) : (historique ? taux(new Date(j * 864e5).getUTCMonth()) : 0));
+    if (sort[j]) ref = j;
+    const est = historique ? taux(new Date(j * 864e5).getUTCMonth()) : 0;
+    s += (livs[j] || 0) - (reel ? (sort[j] || (j - ref > DELAI_SAISIE ? est : 0)) : est);
     hist.push({ j, s: Math.max(0, s) });
   }
   const fin = hist[hist.length - 1], sAuj = fin.s, jAuj = fin.j;
@@ -163,10 +170,17 @@ export function pointFoin(f, auj) {
     conso12 += x.conso * ((b - a) / x.jours); jours12 += b - a;
   }
   const jDepuis = Math.max(0, auj - lj);
-  if (p.reel && jDepuis > 0) { conso12 += p.sorties; jours12 += jDepuis; }
+  if (p.reel && jDepuis > 0) { conso12 += p.sorties + p.estim; jours12 += jDepuis; }
   const rythme = jours12 > 0 ? conso12 / jours12 : null, besoin12 = consoPrevue(f, auj, 365);
   return {
     p, last, jDepuis, depuis: p.reel ? p.sorties : null, rythme, jours12, conso12, besoin12, aVenir, stockAVenir,
     aCommander12: besoin12 == null ? null : Math.max(0, besoin12 - p.stockAuj - stockAVenir)
   };
+}
+
+// Explication de l'estimation pour le mois de la date donnée (jour numérique)
+export function explicationEstimation(f, auj) {
+  const t = tauxMois(f), m = new Date(auj * 864e5).getUTCMonth(), jours = t.n[m], annees = [...t.ans[m]].sort();
+  return { historique: t.historique, mois: m, taux: t.taux(m), moyenne: t.moy, joursMois: jours, annees, joursNotes: t.notes[m], delai: DELAI_SAISIE,
+    source: jours ? (annees.length > 1 ? "saison" : annees.length === 1 ? "saison1" : "notes") : "moyenne" };
 }
