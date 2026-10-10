@@ -247,7 +247,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "43", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "44", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -1216,7 +1216,9 @@ const actions = {
   inventaire(id) {
     const i = id ? comptages(S.foyer).find(x => x.id === id) : { date: ajd() };
     const chemin = id === "legacy" ? "foin/inventaire" : `foin/inventaires/${id}`;
-    ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles === undefined ? "" : fmtQte(i.balles)),
+    const pp = !id ? prevision(S.foyer, aujourdhui()) : null, depart = pp ? (pp.reel && !pp.jEstim ? pp.stockAuj : Math.round(pp.stockAuj)) : null;
+    ouvrir(id ? "Modifier le comptage" : "Comptage du foin", champ("d", "Date du comptage", i.date, "date") + qte("b", "Balles en stock", i.balles !== undefined ? fmtQte(i.balles) : depart === null ? "" : fmtQte(Math.max(0, depart))) +
+      (depart !== null ? `<p class="petit">Pré-rempli avec le stock affiché sur l'accueil (${pp.reel && !pp.jEstim ? "d'après tes saisies" : "estimation"}). Corrige-le avec ce que tu comptes réellement.</p>` : ""),
       () => {
         const o = { date: val("d"), balles: parseQte(val("b")) }; if (!id) o.ts = Date.now(); else if (i.ts) o.ts = i.ts;
         const k = id || push(base("foin/inventaires")).key, p0 = !id ? prevision(S.foyer, jour(o.date)) : null, calc = p0 && jour(o.date) > jour(p0.last.date) ? p0.stockAuj : null;
