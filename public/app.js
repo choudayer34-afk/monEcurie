@@ -247,7 +247,7 @@ const vide = (icone, texte, cta = "") => `<div class="vide">${bulle(icone, "gran
 
 /* ---------- Vues ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { S.vue = b.dataset.v; window.scrollTo(0, 0); rendre(); });
-const VERSION = "44", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
+const VERSION = "47", DATE_VERSION = "2026-10-09"; // à incrémenter à chaque mise à jour livrée
 const ADMIN = "ch-houdayer@hotmail.fr";
 const estAdmin = () => (S.user?.email || "").toLowerCase() === ADMIN;
 const SERVICES = [
@@ -1342,8 +1342,8 @@ const actions = {
   async notifActiver() {
     try {
       if (await Notification.requestPermission() !== "granted") { toast("Notifications refusées"); rendre(); return; }
-      const { cle } = await (await fetch("/api/cle")).json();
-      if (!cle) { toast("Serveur d'envoi pas encore configuré"); return; }
+      const { cle, erreur } = await (await fetch("/api/cle")).json();
+      if (!cle) { toast(erreur ? `Clés d'envoi : ${esc(erreur)}` : "Serveur d'envoi pas encore configuré"); return; }
       const octets = b64u.dec(cle), reg = await navigator.serviceWorker.ready;
       let sub = await reg.pushManager.getSubscription();
       if (sub && (!sub.options?.applicationServerKey || b64u.enc(sub.options.applicationServerKey) !== cle)) { await sub.unsubscribe(); sub = null; }
@@ -1351,7 +1351,7 @@ const actions = {
       const j = sub.toJSON(), k = cleAppareil();
       await vite(update(refNotif(), { ...champsNotif(k), [`${k}/sub`]: { endpoint: j.endpoint, keys: { p256dh: j.keys.p256dh, auth: j.keys.auth } } }));
       toast("Notifications activées"); rendre();
-    } catch { toast("Activation impossible"); }
+    } catch (e) { toast(`Activation impossible${e?.name ? ` (${esc(e.name)})` : ""}`); }
   },
   async notifNtfy() {
     try {
