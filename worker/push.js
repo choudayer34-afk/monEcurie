@@ -28,9 +28,31 @@ export async function chiffrer(clair, p256dh, auth) {
   return coller(entete, chiffre);
 }
 
+// Les valeurs collées dans Cloudflare peuvent contenir des espaces, des retours à la ligne ou des guillemets
+export const nettoyer = v => String(v || "").replace(/\s+/g, "").replace(/^["']+|["']+$/g, "");
+
+// Contrôle des clés : renvoie un message clair, ou null si la paire est valide et cohérente
+export async function verifierCles(env) {
+  const pubT = nettoyer(env.VAPID_PUBLIC), priT = nettoyer(env.VAPID_PRIVATE);
+  if (!pubT || !priT) return "VAPID_PUBLIC (variable) ou VAPID_PRIVATE (secret) est absent de Cloudflare";
+  let pub, pri;
+  try { pub = b64u.dec(pubT); pri = b64u.dec(priT); } catch { return "VAPID_PUBLIC ou VAPID_PRIVATE contient des caractères non valides"; }
+  if (pub.length !== 65 || pub[0] !== 4) return `VAPID_PUBLIC est incorrecte (${pubT.length} caractères, 87 attendus, commençant par B) : recopie-la en entier depuis la page Administration`;
+  if (pri.length !== 32) return `VAPID_PRIVATE est incorrecte (${priT.length} caractères, 43 attendus) : recopie-la en entier`;
+  let cleV;
+  try { cleV = await crypto.subtle.importKey("raw", pub, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]); }
+  catch { return "VAPID_PUBLIC n'est pas une clé valide (point hors courbe) : recopie-la en entier depuis la page Administration, sans espace ni guillemet"; }
+  try {
+    const cleP = await crypto.subtle.importKey("jwk", { kty: "EC", crv: "P-256", x: b64u.enc(pub.slice(1, 33)), y: b64u.enc(pub.slice(33, 65)), d: priT, ext: true }, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, cleP, texte("controle"));
+    if (!(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, cleV, sig, texte("controle")))) throw new Error("paire");
+  } catch { return "VAPID_PUBLIC et VAPID_PRIVATE ne forment pas une paire : elles viennent de deux générations différentes. Recopie les deux depuis la même génération (page Administration)"; }
+  return null;
+}
+
 async function jetonVapid(endpoint, env) {
-  const pub = b64u.dec(env.VAPID_PUBLIC);
-  const cle = await crypto.subtle.importKey("jwk", { kty: "EC", crv: "P-256", x: b64u.enc(pub.slice(1, 33)), y: b64u.enc(pub.slice(33, 65)), d: env.VAPID_PRIVATE, ext: true },
+  const pub = b64u.dec(nettoyer(env.VAPID_PUBLIC));
+  const cle = await crypto.subtle.importKey("jwk", { kty: "EC", crv: "P-256", x: b64u.enc(pub.slice(1, 33)), y: b64u.enc(pub.slice(33, 65)), d: nettoyer(env.VAPID_PRIVATE), ext: true },
     { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const corps = b64u.enc(texte(JSON.stringify({ typ: "JWT", alg: "ES256" }))) + "." + b64u.enc(texte(JSON.stringify({
     aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600,
@@ -47,7 +69,7 @@ export async function envoyer(abonnement, message, env) {
     method: "POST",
     headers: {
       "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", TTL: "43200", Urgency: "normal",
-      Authorization: `vapid t=${await jetonVapid(abonnement.endpoint, env)}, k=${env.VAPID_PUBLIC}`
+      Authorization: `vapid t=${await jetonVapid(abonnement.endpoint, env)}, k=${nettoyer(env.VAPID_PUBLIC)}`
     },
     body: corps
   });

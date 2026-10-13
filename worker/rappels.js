@@ -3,7 +3,7 @@ import { firebaseConfig } from "../public/firebase-config.js";
 import { jour, enChaine, liste, prevision, comptages } from "../public/prevision.js";
 import { prochaine, rdvActif, libelleSoin } from "../public/soins.js";
 import { suivi } from "../public/stocks.js";
-import { envoyer } from "./push.js";
+import { envoyer, verifierCles } from "./push.js";
 
 // Canal ntfy : le message passe par le serveur public ntfy.sh (JSON, compatible accents) ; le nom du sujet sert de mot de passe
 async function envoyerNtfy(n, m) {
@@ -106,8 +106,9 @@ export async function test(req, env) {
   if (!(await fb(env, `foyers/${fid}/membres/${uid}`))) return { code: 403, erreur: "Non autorisé" };
   const n = await fb(env, `foyers/${fid}/notifs/${appareil}`);
   if (!n?.sub?.endpoint && !n?.ntfy) return { code: 404, erreur: "Appareil non enregistré" };
-  if (n.sub?.endpoint && !n.ntfy && (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE)) return { code: 503, erreur: "Clés d'envoi absentes de Cloudflare" };
-  const sansCles = n.sub?.endpoint && (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE);
+  const problemeCles = n.sub?.endpoint ? await verifierCles(env) : null;
+  if (problemeCles && !n.ntfy) return { code: 503, erreur: problemeCles };
+  const sansCles = !!problemeCles;
   const { st } = await diffuser(sansCles ? { ...n, sub: null } : n, { titre: "Écurie", corps: "Notification de test : tout fonctionne.", url: "./", tag: "ecurie-test" }, env);
   return st > 0 && st < 300 ? { code: 200, ok: true } : { code: 502, erreur: `Refus du service de notification (${st || "aucun envoi"})` };
 }
